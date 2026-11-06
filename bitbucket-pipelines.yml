@@ -1,0 +1,25 @@
+image: node:22
+
+definitions:
+    steps:
+        - step: &github-sync
+              name: Sync to GitHub
+              clone:
+                  depth: full
+              script:
+                  - git fetch origin master --tags
+                  - git checkout -B master origin/master
+                  # Authenticates via the repository SSH key configured in Pipelines settings,
+                  # registered as a write-enabled deploy key on the GitHub mirror
+                  - git remote add github git@github.com:gopaycommunity/gopay-react-native-sdk.git || true
+                  - git fetch github
+                  - git push github master --force-with-lease
+                  - git push github --tags
+
+pipelines:
+    branches:
+        master:
+            - step: *github-sync
+    custom:
+        github-sync:
+            - step: *github-sync
