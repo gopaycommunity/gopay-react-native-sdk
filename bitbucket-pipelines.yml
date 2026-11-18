@@ -1,7 +1,21 @@
 image: node:22
 
 definitions:
+    caches:
+        # npm ci deletes node_modules, so cache npm's download cache instead.
+        npm: ~/.npm
     steps:
+        - step: &checks
+              name: Lint, typecheck and test
+              caches:
+                  - npm
+              script:
+                  - npm ci
+                  # The typecheck also covers example/, which needs its own dependencies.
+                  - npm ci --prefix example
+                  - npm run lint
+                  - npm run typecheck
+                  - npm test -- --ci
         - step: &github-sync
               name: Sync to GitHub
               clone:
@@ -17,6 +31,9 @@ definitions:
                   - git push github --tags
 
 pipelines:
+    pull-requests:
+        '**':
+            - step: *checks
     branches:
         master:
             - step: *github-sync

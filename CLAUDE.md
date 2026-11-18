@@ -33,8 +33,9 @@ Rules:
 - Conventional commits checked by Husky + commitlint (`commitlint` in `package.json`, same
   rules as the native repos): a Jira reference `GPMOB-` is required, e.g.
   `feat: expose the native SDK version GPMOB-162`.
-- Branches `feat/GPMOB-<n>-<slug>` from `master`. Bitbucket Pipelines mirrors `master` to
-  GitHub `gopaycommunity/gopay-react-native-sdk`.
+- Branches `feat/GPMOB-<n>-<slug>` from `master`. Bitbucket Pipelines runs lint, typecheck
+  and tests on every pull request (no native build yet) and mirrors `master` to GitHub
+  `gopaycommunity/gopay-react-native-sdk`.
 - Supported Expo: 58 (recommended) and 57 (minimum), i.e. the current one and one back. The
   package's devDependencies use the same React Native version as `example/`; mismatched
   versions break the Metro bundle.
