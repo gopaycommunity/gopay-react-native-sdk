@@ -1,0 +1,18 @@
+{
+  "expo": {
+    "name": "GoPay RN SDK Example",
+    "slug": "gopay-react-native-sdk-example",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "bundleIdentifier": "cz.gopay.reactnative.example"
+    },
+    "android": {
+      "package": "cz.gopay.reactnative.example"
+    },
+    "experiments": {
+      "autolinkingModuleResolution": true
+    }
+  }
+}
