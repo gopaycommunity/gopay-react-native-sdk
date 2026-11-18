@@ -1,0 +1,44 @@
+import groovy.json.JsonSlurper
+
+buildscript {
+  repositories {
+    mavenCentral()
+  }
+  dependencies {
+    // Compose compiler plugin matching the app's Kotlin, as expo-modules-core does for its own Compose feature.
+    classpath("org.jetbrains.kotlin.plugin.compose:org.jetbrains.kotlin.plugin.compose.gradle.plugin:${kotlinVersion}")
+  }
+}
+
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+apply plugin: 'org.jetbrains.kotlin.plugin.compose'
+
+// The package version and the native GoPay SDK version (`gopayNativeSdkVersion`, shared with the iOS podspec).
+def packageJson = new JsonSlurper().parse(new File(projectDir, '../package.json'))
+
+group = 'cz.gopay.reactnative'
+version = packageJson.version
+
+android {
+  namespace 'cz.gopay.reactnative'
+  defaultConfig {
+    minSdkVersion 24
+    versionCode 1
+    versionName packageJson.version
+  }
+  buildFeatures {
+    compose true
+  }
+}
+
+dependencies {
+  implementation "cz.gopay:sdk:${packageJson.gopayNativeSdkVersion}"
+  // The SDK's card form is Compose; its POM lists Compose only as runtime, so the module declares it directly.
+  implementation platform('androidx.compose:compose-bom:2025.02.00')
+  implementation 'androidx.compose.ui:ui'
+  implementation 'androidx.compose.foundation:foundation'
+}
