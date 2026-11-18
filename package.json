@@ -82,6 +82,9 @@
       "references-empty": [
         2,
         "never"
+      ],
+      "body-max-line-length": [
+        0
       ]
     }
   }
