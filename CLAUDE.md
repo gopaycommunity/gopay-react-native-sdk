@@ -28,6 +28,31 @@ Rules:
   native. Only the JWE and the card metadata go to JS; `payment_secret` only goes in when a
   session starts and is never logged.
 
+## How the bridge works
+
+- **Errors as data.** Every native function that can fail returns an envelope, `{ result }` or
+  `{ error: { code, message, httpStatus?, chargeState?, gatewayError? } }`; `unwrap` in `src/envelope.ts` throws
+  `GopayError` from it. Never `reject` a native SDK error: Expo's reject carries only a code and a message.
+  Anything that is not a native SDK error is rethrown and reaches JS as a plain Expo error, never as a
+  `GopayError`.
+- **Sessions are handles.** JS keeps no native object, only per `paymentId` a count of the handles it gave out
+  and of the starts and gets still asking the native SDK (`src/sessions.ts`, its header comment). The `session*`
+  native functions look the session up in the native SDK and answer `AUTH_013` when it is gone; `sessionClose` of
+  a missing session does nothing. A handle's `close()` calls `sessionClose` only for the last open handle, and
+  only when no start or get is asking (the last of them closes it then, unless it got a handle); a closed handle
+  answers `AUTH_013` in JS. A start or get waits for a running close, and asks again when
+  `closeAllPaymentSessions` overlapped it. `startPaymentSession` asks `hasPaymentSession` first and returns a
+  handle without a native start when the session exists; `AUTH_012` from a racing start also becomes a handle.
+  That is the one place JS differs from native on purpose. Race tests answer each native call in a step of its
+  own, in both orders; `src/__tests__/sessions.model.test.ts` runs seeded random interleavings against a model of
+  the native registry and checks the invariants in its header. Keep that model true to the native SDKs.
+- **Before `initialize`** the Android bridge checks `GopaySDK.isInitialized()` and answers as iOS does (no session,
+  nothing to close) instead of the native `CONFIG_001`.
+- **Models** are converted by hand on both sides (`bridged` in Swift, `Bridged.kt`), with the native property
+  names, enums as their raw values and no entry for a null. `PaymentDetails.paymentSecret` never crosses.
+- `GOPAY_ERROR_CODES` in `src/GopayError.ts` is compared with `sdk/docs/ERROR_CODES.md` of both native repos
+  when they are checked out next to this one; otherwise (CI) that test is skipped.
+
 ## Conventions
 
 - Conventional commits checked by Husky + commitlint (`commitlint` in `package.json`, same
