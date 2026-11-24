@@ -2,7 +2,7 @@
   "name": "@gopaycz/gopay-react-native-sdk",
   "version": "0.0.0",
   "description": "GoPay SDK for React Native (Expo module over the native iOS and Android SDKs)",
-  "gopayNativeSdkVersion": "3.0.0",
+  "gopayNativeSdkVersion": "3.1.1",
   "main": "build/index.js",
   "types": "build/index.d.ts",
   "files": [
