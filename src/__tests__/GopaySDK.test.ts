@@ -13,12 +13,16 @@ const mockNative = {
   sessionGetChargeState: jest.fn(),
   sessionGetQrPaymentInfo: jest.fn(),
   sessionClose: jest.fn(),
+  submitCardForm: jest.fn(),
+  submitCardFormWithMetadata: jest.fn(),
+  clearCardFormData: jest.fn(),
 };
 const mockRequireNativeModule = jest.fn((_name: string) => mockNative);
 
 jest.mock('expo', () => ({
   NativeModule: class {},
   requireNativeModule: (name: string) => mockRequireNativeModule(name),
+  requireNativeView: () => 'NativePaymentCardForm',
 }));
 
 // Required, not imported: imports are hoisted above the mock factory's variables.
@@ -680,6 +684,66 @@ describe('answers that arrive in any order', () => {
 
     await expect(closed).rejects.toThrow('bridge failed');
     await expect(restart).resolves.toMatchObject({ paymentId: 'p1' });
+  });
+});
+
+describe('card form calls', () => {
+  // A JWE of five parts, as the gateway's look; the tests never need a real one.
+  const jwe = 'header.key.iv.ciphertext.tag';
+  // An id with spaces and capitals, so that a trim or a lowercase on the way would show.
+  const formId = ' Checkout Form ';
+
+  it('submitCardForm passes the formId as it is and resolves with the JWE', async () => {
+    mockNative.submitCardForm.mockResolvedValue({ result: jwe });
+    await expect(GopaySDK.submitCardForm(formId)).resolves.toBe(jwe);
+    expect(mockNative.submitCardForm).toHaveBeenCalledWith(formId);
+  });
+
+  it.each(['VALIDATION_008', 'VALIDATION_007', 'CONFIG_001'])(
+    'submitCardForm throws %s from the envelope as a GopayError',
+    async (code) => {
+      mockNative.submitCardForm.mockResolvedValue(failure(code));
+      const error = await GopaySDK.submitCardForm(formId).catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(GopayError);
+      expect(error).toMatchObject({ code, message: `[${code}] failed` });
+    }
+  );
+
+  it('submitCardFormWithMetadata passes the formId and resolves with the payload and metadata', async () => {
+    const result = {
+      encryptedPayload: jwe,
+      cardMetadata: {
+        scheme: 'VISA',
+        corporate: false,
+        serviceType: 'DEBIT',
+        issuerCountry: 'CZE',
+      },
+    };
+    mockNative.submitCardFormWithMetadata.mockResolvedValue({ result });
+    await expect(GopaySDK.submitCardFormWithMetadata(formId)).resolves.toEqual(result);
+    expect(mockNative.submitCardFormWithMetadata).toHaveBeenCalledWith(formId);
+  });
+
+  it('submitCardFormWithMetadata resolves without cardMetadata when the native SDK has none', async () => {
+    mockNative.submitCardFormWithMetadata.mockResolvedValue({ result: { encryptedPayload: jwe } });
+    const payload = await GopaySDK.submitCardFormWithMetadata(formId);
+    expect(payload).toEqual({ encryptedPayload: jwe });
+    expect('cardMetadata' in payload).toBe(false);
+  });
+
+  it('submitCardFormWithMetadata throws the envelope error as a GopayError', async () => {
+    mockNative.submitCardFormWithMetadata.mockResolvedValue(failure('VALIDATION_008'));
+    const error = await GopaySDK.submitCardFormWithMetadata(formId).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(GopayError);
+    expect(error).toMatchObject({ code: 'VALIDATION_008' });
+  });
+
+  it('clearCardFormData passes the formId to the native SDK at once and returns nothing', () => {
+    // Whatever the native function returns, the call returns nothing.
+    mockNative.clearCardFormData.mockReturnValue('native value');
+    expect(GopaySDK.clearCardFormData(formId)).toBeUndefined();
+    expect(mockNative.clearCardFormData).toHaveBeenCalledTimes(1);
+    expect(mockNative.clearCardFormData).toHaveBeenCalledWith(formId);
   });
 });
 

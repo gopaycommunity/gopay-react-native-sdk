@@ -3,6 +3,7 @@ import { NativeModule, requireNativeModule } from 'expo';
 import type { Envelope } from './envelope';
 import type {
   ChargePaymentResponse,
+  EncryptedCardPayloadWithMetadata,
   PaymentDetails,
   PaymentOutcome,
   QrCodeFormat,
@@ -54,6 +55,12 @@ declare class GopayReactNativeSDKModule extends NativeModule {
     format: QrCodeFormat | null
   ): Promise<Envelope<QrPaymentDetails>>;
   sessionClose(paymentId: string): Promise<Envelope<null>>;
+
+  /** Resolves with the JWE of the card the form under `formId` holds. */
+  submitCardForm(formId: string): Promise<Envelope<string>>;
+  submitCardFormWithMetadata(formId: string): Promise<Envelope<EncryptedCardPayloadWithMetadata>>;
+  /** Never fails; does nothing before `initialize`. */
+  clearCardFormData(formId: string): void;
 }
 
 export default requireNativeModule<GopayReactNativeSDKModule>(NATIVE_MODULE_NAME);

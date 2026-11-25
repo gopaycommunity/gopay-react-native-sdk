@@ -1,5 +1,6 @@
 import NativeGopay, { type NativeConfig } from './GopayReactNativeSDKModule';
 import { unwrap } from './envelope';
+import type { EncryptedCardPayloadWithMetadata } from './models';
 import { closeAllSessions, obtainSession, type PaymentSession } from './sessions';
 
 export type { PaymentSession };
@@ -142,5 +143,44 @@ export const GopaySDK = Object.freeze({
    */
   async closeAllPaymentSessions(): Promise<void> {
     await closeAllSessions();
+  },
+
+  /**
+   * Encrypts the card the `PaymentCardForm` with `formId` holds into a JWE for the merchant's
+   * backend. The card itself never reaches JS. On success the native SDK drops its copy of the
+   * card and empties the form; a failure leaves the card as the user typed it.
+   *
+   * Use the JWE promptly and for a single charge: the gateway accepts it once and within 10
+   * minutes of its creation. Never log it.
+   *
+   * @throws {GopayError} `VALIDATION_008` when no form is on screen under `formId` or its fields
+   *   are empty, `VALIDATION_007` for an invalid card, `CONFIG_001` before
+   *   `initialize`, and otherwise what the encryption ends with.
+   */
+  async submitCardForm(formId: string): Promise<string> {
+    return unwrap(await NativeGopay.submitCardForm(formId));
+  },
+
+  /**
+   * {@link GopaySDK.submitCardForm} that also returns what the gateway knows about the card. The
+   * lookup never fails the call: without an answer within 3 seconds, `cardMetadata` is missing and
+   * the JWE comes all the same. The call can therefore take up to 3 seconds longer.
+   *
+   * @throws {GopayError} What `submitCardForm` throws, for the same reasons.
+   */
+  async submitCardFormWithMetadata(formId: string): Promise<EncryptedCardPayloadWithMetadata> {
+    return unwrap(await NativeGopay.submitCardFormWithMetadata(formId));
+  },
+
+  /**
+   * Drops the native SDK's copy of the card in the form with `formId` and empties its fields, for
+   * when the user abandons the checkout while the form stays on screen. Never throws.
+   *
+   * Before `initialize` the platforms differ, as the native SDKs do: iOS empties the form all the
+   * same, while on Android, whose SDK clears only through its instance, nothing happens and the
+   * form keeps what the user typed.
+   */
+  clearCardFormData(formId: string): void {
+    NativeGopay.clearCardFormData(formId);
   },
 });
