@@ -1,6 +1,8 @@
 package cz.gopay.reactnative
 
+import cz.gopay.sdk.model.CardMetadata
 import cz.gopay.sdk.model.ChargePaymentResponse
+import cz.gopay.sdk.model.EncryptedCardPayloadWithMetadata
 import cz.gopay.sdk.model.PaymentCustomer
 import cz.gopay.sdk.model.PaymentDetails
 import cz.gopay.sdk.model.PaymentOutcome
@@ -111,4 +113,18 @@ internal fun QrPaymentDetails.bridged(): Map<String, Any> = compact(
     "sepa" to qrCode.sepa,
     "mnbQr" to qrCode.mnbQr
   )
+)
+
+internal fun EncryptedCardPayloadWithMetadata.bridged(): Map<String, Any> = compact(
+  "encryptedPayload" to encryptedPayload,
+  "cardMetadata" to cardMetadata?.bridged()
+)
+
+internal fun CardMetadata.bridged(): Map<String, Any> = compact(
+  "scheme" to scheme.name,
+  "corporate" to corporate,
+  "brand" to brand,
+  "serviceType" to serviceType?.name,
+  "issuer" to issuer,
+  "issuerCountry" to issuerCountry
 )

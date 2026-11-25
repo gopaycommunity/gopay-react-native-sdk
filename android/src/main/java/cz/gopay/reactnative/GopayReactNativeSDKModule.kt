@@ -99,6 +99,33 @@ class GopayReactNativeSDKModule : Module() {
         null
       }
     }
+
+    // The card form. The card stays in the SDK; only the JWE and the card's metadata come back.
+    // Before `initialize`, getInstance() answers CONFIG_001, as the iOS SDK does.
+    AsyncFunction("submitCardForm") Coroutine { formId: String ->
+      envelope { GopaySDK.getInstance().submitCardForm(formId) }
+    }
+
+    AsyncFunction("submitCardFormWithMetadata") Coroutine { formId: String ->
+      envelope { GopaySDK.getInstance().submitCardFormWithMetadata(formId).bridged() }
+    }
+
+    // Never throws. Before `initialize` the Android SDK has no instance to clear through, so the
+    // bridge does nothing and a form on screen keeps its card; the iOS SDK empties it. A
+    // difference of the native SDKs, left as it is.
+    Function("clearCardFormData") { formId: String ->
+      sdkOrNull()?.clearCardFormData(formId)
+      Unit
+    }
+
+    // The SDK's `PaymentCardForm`, hosted as it is (see PaymentCardFormView.kt).
+    View(PaymentCardFormView::class) {
+      Events("onFormHeightChange")
+
+      Prop("formId") { view: PaymentCardFormView, formId: String ->
+        view.formId = formId
+      }
+    }
   }
 
   /**
