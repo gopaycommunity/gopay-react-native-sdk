@@ -4,7 +4,17 @@ import { createRoot, type Root, type TestInstance } from 'test-renderer';
 
 /** The host element the mocked native view renders as. */
 const NATIVE_VIEW = 'NativePaymentCardForm';
-const mockRequireNativeView = jest.fn((_module: string) => NATIVE_VIEW);
+/** How many times the mocked native view was mounted, as a native view would be created. */
+let mockNativeViewMounts = 0;
+const mockRequireNativeView = jest.fn((_module: string) => {
+  const { createElement, useEffect } = require('react') as typeof import('react');
+  return function MockNativePaymentCardForm(props: object) {
+    useEffect(() => {
+      mockNativeViewMounts += 1;
+    }, []);
+    return createElement(NATIVE_VIEW, props);
+  };
+});
 
 jest.mock('expo', () => ({
   NativeModule: class {},
@@ -68,6 +78,17 @@ describe('PaymentCardForm', () => {
 
     await render(<PaymentCardForm formId="other" />);
     expect(nativeView().props.formId).toBe('other');
+  });
+
+  it('keeps the native view mounted when the formId changes, so the typed card stays', async () => {
+    await render(<PaymentCardForm formId="checkout" />);
+    const mounts = mockNativeViewMounts;
+    expect(mounts).toBeGreaterThan(0);
+
+    await render(<PaymentCardForm formId="other" />);
+    expect(nativeView().props.formId).toBe('other');
+    // A remount (e.g. key={formId}) would wipe the card; the native SDK moves it to the new id.
+    expect(mockNativeViewMounts).toBe(mounts);
   });
 
   it('has no height of its own until the native view reports one', async () => {
