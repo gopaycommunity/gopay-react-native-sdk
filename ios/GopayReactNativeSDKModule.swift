@@ -71,6 +71,30 @@ public class GopayReactNativeSDKModule: Module {
       await GopaySDK.shared.getPaymentSession(paymentId)?.close()
       return Envelope.success(nil)
     }
+
+    // The card form. The card stays in the SDK; only the JWE and the card's metadata come back.
+    AsyncFunction("submitCardForm") { (formId: String) async throws -> [String: Any] in
+      try await Envelope.of { try await GopaySDK.shared.submitCardForm(formId: formId) }
+    }
+
+    AsyncFunction("submitCardFormWithMetadata") { (formId: String) async throws -> [String: Any] in
+      try await Envelope.of { try await GopaySDK.shared.submitCardFormWithMetadata(formId: formId).bridged }
+    }
+
+    // Never throws. The iOS SDK clears also before `initialize` and empties a form on screen; the
+    // Android SDK cannot, so there the bridge does nothing (a difference of the native SDKs).
+    Function("clearCardFormData") { (formId: String) in
+      GopaySDK.shared.clearCardFormData(formId: formId)
+    }
+
+    // The SDK's `PaymentCardForm`, hosted as it is (see PaymentCardFormView.swift).
+    View(PaymentCardFormView.self) {
+      Events("onFormHeightChange")
+
+      Prop("formId") { (view: PaymentCardFormView, formId: String) in
+        view.formId = formId
+      }
+    }
   }
 
   /// The SDK's session for `paymentId`, or `AUTH_013` as a call on a closed session throws it.
@@ -215,6 +239,28 @@ extension ChargePaymentResponse {
         ])
       },
       "failReason": failReason,
+    ])
+  }
+}
+
+extension EncryptedCardPayloadWithMetadata {
+  var bridged: [String: Any] {
+    compact([
+      "encryptedPayload": encryptedPayload,
+      "cardMetadata": cardMetadata?.bridged,
+    ])
+  }
+}
+
+extension CardMetadata {
+  var bridged: [String: Any] {
+    compact([
+      "scheme": scheme.rawValue,
+      "corporate": corporate,
+      "brand": brand,
+      "serviceType": serviceType?.rawValue,
+      "issuer": issuer,
+      "issuerCountry": issuerCountry,
     ])
   }
 }
