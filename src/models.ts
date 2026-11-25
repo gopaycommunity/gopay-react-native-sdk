@@ -144,3 +144,34 @@ export interface QrPaymentDetails {
   readonly recipient: QrRecipient;
   readonly qrCode: QrCodeList;
 }
+
+/** `CardServiceType` of the native SDKs: whether a card is a debit or a credit card. */
+export type CardServiceType = 'DEBIT' | 'CREDIT';
+
+/**
+ * What the gateway knows about a card from the start of its number (`POST /cards/bin-lookup`).
+ * For showing the card or picking a flow; a payment never depends on it.
+ */
+export interface CardMetadata {
+  /** `'VISA'` or `'MASTERCARD'`; the native SDKs never put `'UNKNOWN'` here. */
+  readonly scheme: CardScheme;
+  readonly corporate: boolean;
+  /** The product level of the card, e.g. `GOLD`. */
+  readonly brand?: string;
+  readonly serviceType?: CardServiceType;
+  /** The name of the bank that issued the card. */
+  readonly issuer?: string;
+  /** The issuer's country, ISO 3166-1 alpha-3, e.g. `CZE`. */
+  readonly issuerCountry?: string;
+}
+
+/** What `GopaySDK.submitCardFormWithMetadata` resolves with. */
+export interface EncryptedCardPayloadWithMetadata {
+  /** The JWE of the card, good for a single charge within 10 minutes. Never log it. */
+  readonly encryptedPayload: string;
+  /**
+   * Missing when the gateway knows nothing about the card, or the lookup failed or took longer
+   * than 3 seconds. The payload is good either way.
+   */
+  readonly cardMetadata?: CardMetadata;
+}
