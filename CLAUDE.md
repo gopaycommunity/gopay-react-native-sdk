@@ -27,6 +27,9 @@ Rules:
 - **No card data crosses the bridge.** Card number, CVV, expiry, BIN and the public key stay
   native. Only the JWE and the card metadata go to JS; `payment_secret` only goes in when a
   session starts and is never logged.
+  The card form view follows the same rule: no prop, event or function writes into the form or
+  reads from it, not even for tests or the example (no `devFill`); its only event is its height.
+  The card is typed by hand. JWE is never logged; the example shows only its length and parts.
 
 ## How the bridge works
 
@@ -43,11 +46,26 @@ Rules:
   answers `AUTH_013` in JS. A start or get waits for a running close, and asks again when
   `closeAllPaymentSessions` overlapped it. `startPaymentSession` asks `hasPaymentSession` first and returns a
   handle without a native start when the session exists; `AUTH_012` from a racing start also becomes a handle.
-  That is the one place JS differs from native on purpose. Race tests answer each native call in a step of its
+  That is one of two places JS differs from native on purpose; the other is `formId`, required in JS for the card
+  form and its three calls, where the native SDKs take `nil` for the form that was active last. Race tests answer each native call in a step of its
   own, in both orders; `src/__tests__/sessions.model.test.ts` runs seeded random interleavings against a model of
   the native registry and checks the invariants in its header. Keep that model true to the native SDKs.
 - **Before `initialize`** the Android bridge checks `GopaySDK.isInitialized()` and answers as iOS does (no session,
   nothing to close) instead of the native `CONFIG_001`.
+- **The card form is hosted, not copied.** `PaymentCardForm` (`src/PaymentCardForm.tsx`) renders the view
+  that `View(...)` registers in the one native module: `ios/PaymentCardFormView.swift` puts the SDK's SwiftUI
+  `PaymentCardForm` in a `UIHostingController` that is a child of the nearest view controller (moved when that
+  changes), at least a point high (SwiftUI lays out nothing without area; that point is transparent while React
+  Native gives a height of 0) and clipping the form below in the hosting view, never in the `ExpoView`, whose
+  clipping, shadow and outline React Native manages; `PaymentCardFormView.kt` puts the SDK's Compose
+  `PaymentCardForm` in a `ComposeView` that uses the lifecycle and saved state owners of its window (the Activity's
+  or the dialog's) and sets none. Where Compose would throw (no owner above the view, or no lifecycle owner above
+  the child of `android.R.id.content`, where Compose creates the window recomposer), the form is left out with one sentence in the debug log. No field, validator or look of the form
+  lives here. The native view measures the form at the width React Native gives, never at a width of 0 (the
+  parent gives the width; the component warns in development) and on Android against an unbounded height and never
+  while the `ComposeView` has no window, which throws. It reports the height through the internal event
+  `onFormHeightChange`; the component applies it unless `style` sets a height. Registration, the wipe on unmount and
+  `FLAG_SECURE` are the native form's own.
 - **Models** are converted by hand on both sides (`bridged` in Swift, `Bridged.kt`), with the native property
   names, enums as their raw values and no entry for a null. `PaymentDetails.paymentSecret` never crosses.
 - `GOPAY_ERROR_CODES` in `src/GopayError.ts` is compared with `sdk/docs/ERROR_CODES.md` of both native repos

@@ -10,9 +10,9 @@ React Native SDK for charging GoPay payments from a mobile app, for the GoPay Pa
 
 **In development, not released yet.** The package is an [Expo module](https://docs.expo.dev/modules/overview/)
 that wraps the native [iOS SDK](https://github.com/gopaycommunity/gopay-ios-sdk) and
-[Android SDK](https://github.com/gopaycommunity/gopay-android-sdk) (both 3.1.1). So far it configures the SDK and
-runs payment sessions: reading the payment, its outcome, the charge and the QR payment details. Charging, the card
-form and wallets come next.
+[Android SDK](https://github.com/gopaycommunity/gopay-android-sdk) (both 3.1.1). So far it configures the SDK, runs
+payment sessions (reading the payment, its outcome, the charge and the QR payment details) and hosts the native card
+form, which turns the card into a JWE. Its theme and other props, charging and wallets come next.
 
 ---
 
@@ -106,6 +106,70 @@ answers `AUTH_013`, also after a new session of the same payment starts, and clo
 `closeAllPaymentSessions()` closes every handle. After a reload JS no longer knows the handles it gave out; the
 native session stays, and the next start or `getPaymentSession` finds it.
 
+### Card form
+
+`PaymentCardForm` shows the card form of the native SDK, `PaymentCardForm` of the iOS SDK (SwiftUI) and of the
+Android SDK (Compose), as it is: its fields, validation and look are the native ones. The card the user types stays
+in the native SDK; JS submits the form by its `formId` and receives only the JWE, which the merchant's backend
+turns into a card token or charges.
+
+```tsx
+import { GopaySDK, PaymentCardForm } from '@gopaycz/gopay-react-native-sdk';
+
+<PaymentCardForm formId="checkout" style={{ marginHorizontal: 16 }} />;
+
+const jwe = await GopaySDK.submitCardForm('checkout');
+```
+
+- **`PaymentCardForm`** takes `formId` and `style`. `formId` is required here and in the three calls, unlike in
+  the native SDKs, where a missing id means the form that was active last: a deliberate narrowing. Keep one form
+  on screen per `formId`: a second form under the same id takes it over, and what the user types into the first
+  one goes nowhere.
+- **`GopaySDK.submitCardForm(formId)`** resolves with the JWE. Send it to your backend promptly and use it for a
+  single payment: the gateway accepts each JWE once and within 10 minutes of its creation. Do not log it. On
+  success the SDK drops the card and empties the form; a failure leaves the card as the user typed it.
+- **`GopaySDK.submitCardFormWithMetadata(formId)`** resolves with `{ encryptedPayload, cardMetadata? }`, the JWE and
+  what the gateway knows about the card (`scheme`, `corporate`, `brand`, `serviceType`, `issuer`,
+  `issuerCountry`). It can take up to 3 seconds longer; `cardMetadata` is missing when the gateway knows nothing
+  about the card or does not answer in time, and the JWE comes all the same.
+- **`GopaySDK.clearCardFormData(formId)`** drops the card and empties the form, for when the user abandons the
+  checkout while the form stays on screen. It never throws.
+- **Errors:** `VALIDATION_008` when no form is on screen under `formId` or its fields are empty, `VALIDATION_007`
+  when the card is invalid, `CONFIG_001` before `initialize`.
+
+Call `initialize` before you show the form. The form shows before it too, but `clearCardFormData` then differs
+between the platforms, as the native SDKs do: iOS empties the form, Android does nothing and the form keeps what the
+user typed.
+
+**Width and height.** The parent must give the form its width: the form has no width of its own. In a column with
+the default `alignItems: 'stretch'` it gets the column's width; under `alignItems: 'center'` or in a row, give it
+one, or it stays invisible (in development the component warns once):
+
+```tsx
+<View style={{ alignItems: 'center' }}>
+  <PaymentCardForm formId="checkout" style={{ alignSelf: 'stretch' }} />
+</View>
+<View style={{ flexDirection: 'row' }}>
+  <PaymentCardForm formId="checkout" style={{ flex: 1 }} />
+</View>
+```
+
+The form measures the height it needs at that width and takes it, also after a rotation or a change of the text
+size. A `height` in `style`, also inside an array of styles, wins over the measured one, and then the layout is
+yours: a form taller than that is cut off below.
+
+**Unmounting** the component drops the card, natively. Navigating away, a reload of the JS bundle and a remount
+after Fast Refresh leave an empty form; a Fast Refresh that keeps the component, and the app going to the
+background and back, keep the card. A virtualized list (`FlatList`, `SectionList`) unmounts rows that scroll out
+of view and so drops the card, and so does `removeClippedSubviews` on both platforms, which detaches views out of
+view: keep the form outside them.
+
+**Screenshots on Android.** While the form is mounted, the Android SDK sets `FLAG_SECURE` on the window it is in,
+which in React Native is the window of the whole app: no screenshots or screen recordings of any screen while the
+form is mounted. The flag comes off when the form unmounts, unless the window had it before. In a debuggable build
+the SDK does not set it, so screenshots keep working during development. On iOS the form covers itself in the app
+switcher and while the screen is recorded.
+
 ### Errors
 
 Every failure of the SDK is thrown as a `GopayError` with the shared `code` of the native SDKs (`GopayErrorCode`,
@@ -155,6 +219,11 @@ For the session handles it also has a checkout that starts the session in an eff
 `initialize (other connection)`, which changes only the request timeout, so the native SDK closes every session and
 the handles answer `AUTH_013`. Strict Mode runs effects twice only in a development (Debug) build; in a Release
 build the checkout runs its effect once.
+
+The card form section shows `PaymentCardForm` with the id `checkout` (in `<StrictMode>` too), buttons for
+`submitCardForm`, `submitCardFormWithMetadata` and `clearCardFormData`, and one that unmounts and mounts the form
+again. Type the card into the form by hand; the result shows only the length of the JWE and how many parts it has,
+never the JWE itself. A successful submit needs the merchant's keys in `example/.env.local`.
 
 If CocoaPods fails during prebuild, run it with `LANG=en_US.UTF-8`.
 
