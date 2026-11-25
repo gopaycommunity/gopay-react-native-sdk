@@ -8,7 +8,8 @@ export interface PaymentCardFormProps {
   /**
    * Identifies the form to `GopaySDK.submitCardForm`, `submitCardFormWithMetadata` and
    * `clearCardFormData`. Keep one form on screen per `formId`. Required, unlike in the native
-   * SDKs, where a missing id means the form that was active last.
+   * SDKs, where a missing id means the form that was active last. Changing it on a mounted form
+   * moves the form and the card typed into it to the new id.
    */
   formId: string;
   /**
@@ -79,6 +80,8 @@ export function PaymentCardForm({ formId, style }: PaymentCardFormProps) {
   checkFormId(formId);
 
   return (
+    // No `key={formId}` on purpose: the native SDK moves the form and its card to a new formId
+    // itself, while a key would remount the form and drop the card.
     <NativePaymentCardForm
       formId={formId}
       onFormHeightChange={onFormHeightChange}

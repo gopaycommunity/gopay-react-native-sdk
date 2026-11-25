@@ -4,7 +4,8 @@ import SwiftUI
 
 /// Hosts the SDK's SwiftUI `PaymentCardForm` as it is, in a `UIHostingController` attached to the
 /// nearest view controller, so that SwiftUI gets its lifecycle (focus, keyboard, `onAppear` and
-/// `onDisappear`, which register and wipe the form in the SDK).
+/// `onDisappear`, which register and wipe the form in the SDK). A new `formId` on a form that is on
+/// screen needs no new `onAppear`: the SDK moves the registration and the card to it itself.
 ///
 /// React Native gives the width; the form's height is measured here and reported to JS through
 /// `onFormHeightChange`, which the JS component applies as the view's height. Nothing about the
@@ -16,7 +17,8 @@ final class PaymentCardFormView: ExpoView {
   private let model = HostedCardFormModel()
   private let hostingController: UIHostingController<HostedCardForm>
 
-  /// The `formId` the form registers under in the SDK. The form is created when it arrives.
+  /// The `formId` the form registers under in the SDK. The form is created when it arrives; when
+  /// it changes later, the SDK moves the registration and the typed card to the new id itself.
   var formId: String? {
     get { model.formId }
     set { model.formId = newValue }

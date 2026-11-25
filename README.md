@@ -124,7 +124,8 @@ const jwe = await GopaySDK.submitCardForm('checkout');
 - **`PaymentCardForm`** takes `formId` and `style`. `formId` is required here and in the three calls, unlike in
   the native SDKs, where a missing id means the form that was active last: a deliberate narrowing. Keep one form
   on screen per `formId`: a second form under the same id takes it over, and what the user types into the first
-  one goes nowhere.
+  one goes nowhere. Changing `formId` on a mounted form moves the form and the card the user has typed to the new
+  id.
 - **`GopaySDK.submitCardForm(formId)`** resolves with the JWE. Send it to your backend promptly and use it for a
   single payment: the gateway accepts each JWE once and within 10 minutes of its creation. Do not log it. On
   success the SDK drops the card and empties the form; a failure leaves the card as the user typed it.

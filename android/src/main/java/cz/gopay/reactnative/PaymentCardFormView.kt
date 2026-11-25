@@ -36,7 +36,10 @@ class PaymentCardFormView(context: Context, appContext: AppContext) : ExpoView(c
   /** Measured and laid out by Android, so a change of the Compose content reaches the layout. */
   override val shouldUseAndroidLayout: Boolean = true
 
-  /** The `formId` the form registers under in the SDK. The form is composed when it arrives. */
+  /**
+   * The `formId` the form registers under in the SDK. The form is composed when it arrives; when it
+   * changes later, the SDK moves the registration and the typed card to the new id itself.
+   */
   var formId: String? by mutableStateOf(null)
 
   /** The last height reported to JS, in dp. */
