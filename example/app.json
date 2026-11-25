@@ -3,7 +3,7 @@
     "name": "GoPay RN SDK Example",
     "slug": "gopay-react-native-sdk-example",
     "version": "1.0.0",
-    "orientation": "portrait",
+    "orientation": "default",
     "userInterfaceStyle": "light",
     "ios": {
       "bundleIdentifier": "cz.gopay.reactnative.example"

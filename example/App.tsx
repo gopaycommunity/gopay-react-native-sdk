@@ -8,7 +8,7 @@ import { requireNativeModule } from 'expo';
 import { StrictMode, useCallback, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
-import { Checkout } from './Checkout';
+import { CardFormCheckout, Checkout } from './Checkout';
 
 // A tool for checking the bridge by hand, not a demo. The merchant's keys come from
 // example/.env.local (see .env.example), which git ignores; the repository holds none.
@@ -231,6 +231,11 @@ export default function App() {
             />
           </StrictMode>
         )}
+        {/* In Strict Mode, so that a double effect run of the form would show. */}
+        <StrictMode>
+          <CardFormCheckout output={setOutput} />
+        </StrictMode>
+
         <Text style={styles.small}>Two starts: {pair.length} handle(s) kept</Text>
         <Text testID="checkout-log" selectable style={styles.output}>
           {checkoutLog.length ? checkoutLog.join('\n') : 'checkout log: empty'}
