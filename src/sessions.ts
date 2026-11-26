@@ -1,7 +1,10 @@
 import { GopayError } from './GopayError';
 import NativeGopay from './GopayReactNativeSDKModule';
+import { awaitChargeState } from './callbacks';
 import { type Envelope, unwrap } from './envelope';
 import type {
+  AwaitChargeOptions,
+  ChargeOptions,
   ChargePaymentResponse,
   PaymentDetails,
   PaymentOutcome,
@@ -18,7 +21,27 @@ export interface PaymentSession {
   readonly paymentId: string;
   getStatus(): Promise<PaymentDetails>;
   getPaymentOutcome(): Promise<PaymentOutcome>;
+  /**
+   * Charges the payment with the JWE of a card, the one `GopaySDK.submitCardForm` returned. The
+   * gateway takes each JWE once. Read the result with {@link PaymentSession.awaitChargeState}.
+   */
+  chargeWithEncryptedCard(jwe: string, options?: ChargeOptions): Promise<ChargePaymentResponse>;
+  /**
+   * Charges the payment with a permanent card token your backend got from the gateway. Read the
+   * result with {@link PaymentSession.awaitChargeState}.
+   */
+  chargeWithCardToken(cardToken: string, options?: ChargeOptions): Promise<ChargePaymentResponse>;
   getChargeState(): Promise<ChargePaymentResponse>;
+  /**
+   * Polls the charge until it is decided, running a 3DS challenge on the way in `'automatic'`
+   * mode, and resolves with the charge once it is `'SUCCEEDED'`. A `'FAILED'` charge rejects with
+   * `PAYMENT_006`, one still undecided after `initialTimeoutMs` with `PAYMENT_007`, both with the
+   * charge as `chargeState`. A 3DS challenge the user closes rejects with `PAYMENT_011`; a time that
+   * is not positive, or a `threeDSMode` that is neither `'automatic'` nor `'manual'`, with
+   * `VALIDATION_007` before anything is read. Every callback of `options` has run before the call
+   * settles.
+   */
+  awaitChargeState(options?: AwaitChargeOptions): Promise<ChargePaymentResponse>;
   getQrPaymentInfo(format?: QrCodeFormat): Promise<QrPaymentDetails>;
   /**
    * Closes this handle for good. The native session, with its secret and token, closes with the
@@ -233,8 +256,38 @@ class PaymentSessionHandle implements PaymentSession {
     return unwrap(await NativeGopay.sessionGetPaymentOutcome(this.open()));
   }
 
+  async chargeWithEncryptedCard(
+    jwe: string,
+    options?: ChargeOptions
+  ): Promise<ChargePaymentResponse> {
+    return unwrap(
+      await NativeGopay.sessionChargeWithEncryptedCard(
+        this.open(),
+        jwe,
+        options?.challengePreference ?? null
+      )
+    );
+  }
+
+  async chargeWithCardToken(
+    cardToken: string,
+    options?: ChargeOptions
+  ): Promise<ChargePaymentResponse> {
+    return unwrap(
+      await NativeGopay.sessionChargeWithCardToken(
+        this.open(),
+        cardToken,
+        options?.challengePreference ?? null
+      )
+    );
+  }
+
   async getChargeState(): Promise<ChargePaymentResponse> {
     return unwrap(await NativeGopay.sessionGetChargeState(this.open()));
+  }
+
+  async awaitChargeState(options: AwaitChargeOptions = {}): Promise<ChargePaymentResponse> {
+    return awaitChargeState(this.open(), options);
   }
 
   async getQrPaymentInfo(format?: QrCodeFormat): Promise<QrPaymentDetails> {

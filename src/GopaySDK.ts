@@ -1,5 +1,9 @@
-import NativeGopay, { type NativeConfig } from './GopayReactNativeSDKModule';
-import { unwrap } from './envelope';
+import type { EventSubscription } from 'expo';
+
+import type { GopayError } from './GopayError';
+import NativeGopay, { type NativeConfig, type NativeEvents } from './GopayReactNativeSDKModule';
+import { invokeCallback, nextCallbackId } from './callbacks';
+import { toGopayError, unwrap } from './envelope';
 import type { EncryptedCardPayloadWithMetadata } from './models';
 import { closeAllSessions, obtainSession, type PaymentSession } from './sessions';
 
@@ -21,6 +25,17 @@ export interface GopayConfig {
    * is 60 s on iOS and 30 s on Android; the bridge always passes the value).
    */
   requestTimeoutMs?: number;
+  /**
+   * Called with each error the native SDK reports, once per error, for central logging. Not every
+   * `GopayError` a call throws reaches it: the native SDKs leave out `PAYMENT_007` (an undecided
+   * charge) and `PAYMENT_011` (a closed payment window), and the errors the bridge makes itself
+   * never come here: `AUTH_013` of a closed handle or of a session the native SDK no longer has,
+   * and `VALIDATION_007` of an unknown `threeDSMode`. It does not replace catching the error: the
+   * call throws it all the same. It arrives as an event, so it may come shortly after the call
+   * has thrown. An exception it throws is logged with `console.error`. Anything but a function
+   * counts as no callback.
+   */
+  errorCallback?: (error: GopayError) => void;
 }
 
 /** The request timeout when the config has none, or none the native SDKs accept. */
@@ -66,6 +81,20 @@ export function toNativeConfig(config: GopayConfig): NativeConfig {
 }
 
 /**
+ * The `errorCallback`s native may still call, by the id it sends with each error: the one of the
+ * last `initialize` that succeeded, and those of later ones that failed. A failed `initialize`
+ * leaves the native config as it was, callback included, while the error it fails with goes to
+ * its own callback, as in the native SDKs.
+ */
+const errorCallbacks = new Map<string, (error: GopayError) => void>();
+let errorSubscription: EventSubscription | null = null;
+
+const dispatchError: NativeEvents['onGopayError'] = ({ callbackId, error }) => {
+  const callback = errorCallbacks.get(callbackId);
+  if (callback) invokeCallback('errorCallback', callback, toGopayError(error));
+};
+
+/**
  * A whole number of milliseconds both native SDKs take as it is. Anything else gets the default
  * here, as the native SDKs would do with their own, different defaults.
  */
@@ -98,7 +127,36 @@ export const GopaySDK = Object.freeze({
    * @throws {GopayError}
    */
   initialize(config: GopayConfig): void {
-    unwrap(NativeGopay.initialize(toNativeConfig(config)));
+    const native = toNativeConfig(config);
+    const { errorCallback } = config;
+    let callbackId: string | undefined;
+    if (typeof errorCallback === 'function') {
+      callbackId = nextCallbackId();
+      native.errorCallbackId = callbackId;
+      // Before the native call: Android reports a failed initialize while it runs.
+      errorCallbacks.set(callbackId, errorCallback);
+      errorSubscription ??= NativeGopay.addListener('onGopayError', dispatchError);
+    }
+    let envelope: ReturnType<typeof NativeGopay.initialize>;
+    try {
+      envelope = NativeGopay.initialize(native);
+      if (!('error' in envelope)) {
+        // The native SDK now calls this config's callback, or none.
+        for (const id of [...errorCallbacks.keys()]) {
+          if (id !== callbackId) errorCallbacks.delete(id);
+        }
+      }
+    } catch (error) {
+      // Not an SDK error: the native config is as it was, without this callback.
+      if (callbackId) errorCallbacks.delete(callbackId);
+      throw error;
+    } finally {
+      if (errorCallbacks.size === 0) {
+        errorSubscription?.remove();
+        errorSubscription = null;
+      }
+    }
+    unwrap(envelope);
   },
 
   /**
