@@ -11,8 +11,9 @@ React Native SDK for charging GoPay payments from a mobile app, for the GoPay Pa
 **In development, not released yet.** The package is an [Expo module](https://docs.expo.dev/modules/overview/)
 that wraps the native [iOS SDK](https://github.com/gopaycommunity/gopay-ios-sdk) and
 [Android SDK](https://github.com/gopaycommunity/gopay-android-sdk) (both 3.1.1). So far it configures the SDK, runs
-payment sessions (reading the payment, its outcome, the charge and the QR payment details) and hosts the native card
-form, which turns the card into a JWE. Its theme and other props, charging and wallets come next.
+payment sessions (reading the payment, its outcome, the charge and the QR payment details), hosts the native card
+form, which turns the card into a JWE, and charges a card (a JWE or a card token) with 3DS. The form's theme and
+other props and wallets come next.
 
 ---
 
@@ -50,9 +51,10 @@ await session.close();
   `startPaymentSession({ paymentId, paymentSecret, scope? })`, `getPaymentSession(paymentId)` (a handle or
   `null`) and `closeAllPaymentSessions()`.
 - **`GopayConfig`**: `environment` (`'production'`, `'sandbox'` or `{ development: baseUrl }`), `clientId`,
-  `shareableKey`, `debugLoggingEnabled`, `locale` and `requestTimeoutMs`, which is 30000 by default on both
-  platforms (the native default is 60 s on iOS).
-- **`PaymentSession`**: `paymentId`, `getStatus()`, `getPaymentOutcome()`, `getChargeState()`,
+  `shareableKey`, `debugLoggingEnabled`, `locale`, `requestTimeoutMs`, which is 30000 by default on both
+  platforms (the native default is 60 s on iOS), and `errorCallback` (see below).
+- **`PaymentSession`**: `paymentId`, `getStatus()`, `getPaymentOutcome()`, `chargeWithEncryptedCard(jwe, options?)`,
+  `chargeWithCardToken(cardToken, options?)`, `getChargeState()`, `awaitChargeState(options?)`,
   `getQrPaymentInfo(format?)` and `close()`. In JS a session is a handle on the native session of its
   `paymentId`, and several handles may share one session (see below). A call on a closed handle, or on a session
   the native SDK no longer has, fails with `AUTH_013`.
@@ -170,6 +172,105 @@ which in React Native is the window of the whole app: no screenshots or screen r
 form is mounted. The flag comes off when the form unmounts, unless the window had it before. In a debuggable build
 the SDK does not set it, so screenshots keep working during development. On iOS the form covers itself in the app
 switcher and while the screen is recorded.
+
+### Paying by card
+
+The card is charged on the payment's session; the charge goes through the native SDK, which adds the device's
+browser data for 3DS. Step by step:
+
+```ts
+import { GopayError, GopaySDK, PaymentCardForm } from '@gopaycz/gopay-react-native-sdk';
+
+// 1. When the checkout opens: the session, with the pair your backend created the payment with.
+const session = await GopaySDK.startPaymentSession({ paymentId, paymentSecret });
+
+// 2. The user types the card into <PaymentCardForm formId="checkout" />, then taps Pay:
+const jwe = await GopaySDK.submitCardForm('checkout');
+await session.chargeWithEncryptedCard(jwe); // or session.chargeWithCardToken(cardToken)
+
+// 3. Wait until the charge is decided; the SDK shows the 3DS challenge itself.
+try {
+  await session.awaitChargeState({ returnUrl, onStateChange: (charge) => setState(charge.state) });
+} catch (error) {
+  // PAYMENT_006: declined, PAYMENT_007: not decided in time, PAYMENT_011: the user closed 3DS, …
+  if (error instanceof GopayError) console.warn(error.code, error.chargeState?.state);
+}
+
+// 4. The result to show, and the session closed.
+const { outcome } = await session.getPaymentOutcome(); // 'PAID', 'DECLINED', …
+await session.close();
+```
+
+- **`chargeWithEncryptedCard(jwe, options?)`** charges with the JWE from `submitCardForm`; the gateway takes each
+  JWE once. **`chargeWithCardToken(cardToken, options?)`** charges with a permanent card token your backend got
+  from the gateway. Both resolve with the charge as the gateway answered (often `'REQUESTED'` or
+  `'ACTION_REQUIRED'`); a refused charge throws, with the charge as `chargeState` when the native error has it.
+  Do not log the JWE or the token.
+- **`options.challengePreference`**: `'AUTO'`, `'CHALLENGE_PREFERRED'` or `'NO_CHALLENGE_PREFERRED'`, forwarded to
+  the gateway; without it the charge sends none.
+- **`awaitChargeState(options?)`** polls the charge until it is decided and resolves with it once it is
+  `'SUCCEEDED'`. A `'FAILED'` charge throws `PAYMENT_006`, a charge still undecided after `initialTimeoutMs`
+  throws `PAYMENT_007` (the charge is not over then: read `getChargeState()` or wait for your backend's
+  notification), both with the charge as `chargeState`. On a payment that has no charge yet the wait ends at
+  once with `PAYMENT_012`, as in the native SDKs, not with a timeout. Options, each with the native default when
+  left out:
+  - `intervalMs`: the pause between two reads, default `1000`.
+  - `initialTimeoutMs`: how long the charge may stay undecided, default `30000`, counted from the call. A 3DS
+    challenge lifts it; after an automatic challenge it starts again.
+  - `threeDSMode`: `'automatic'` (default) opens the 3DS challenge in the native SDK and polls on once it closes.
+    `'manual'` only reports the address through `onActionRequired` and polls on without a timeout; the challenge
+    is then yours to run, and nothing opens. Any other value throws `VALIDATION_007`, so that a misspelt
+    `'manual'` never opens a challenge the app meant to run.
+  - `returnUrl`: the `callback.return_url` the payment was created with, where the automatic challenge ends.
+    Without a usable one (missing, not `http(s)` or without a host), the SDK waits for `GopaySDK.chargeReturnUrl`
+    instead, and then the payment has to be created with that address, on both platforms.
+  - `onStateChange(charge)`: every charge state the call reads, the last one included.
+  - `onActionRequired(redirectUrl)`: once for each new 3DS address, before the call settles (see below).
+
+  Zero, a negative time or `NaN` throws `VALIDATION_007` on both platforms before anything is read. The
+  SDK finds the screen for the challenge itself.
+
+**Callbacks.** `onStateChange` and `onActionRequired` run in the order the native SDK calls them, and all of them
+have run before the `Promise` of `awaitChargeState` resolves or rejects. They come from native as events, so they
+run a moment after the native SDK reads the state, never during the read. The callbacks are dropped when the call
+ends; two waits on the same payment each get only their own states. Two differences from the native SDKs follow:
+
+- `onActionRequired` runs before the `Promise` settles, but not before the challenge opens: in `'automatic'` mode
+  the native SDK opens it without waiting for JS, so the challenge may be on screen already when the callback
+  runs. (Natively the callback runs before the challenge opens.)
+- An exception thrown by a callback does not end the wait: the bridge logs it with `console.error` and the call
+  ends as the native SDK ends it. On Android, by contrast, a native `onStateChange` or `onActionRequired` that
+  throws ends the call with that exception; on iOS the callbacks cannot throw.
+
+A closed handle answers `AUTH_013` at once. Closing the session while a wait runs, by its last handle or by
+`closeAllPaymentSessions()`, ends the wait with `AUTH_013` at its next read.
+
+**After a reload** JS no longer hears a wait that was running. On Android the bridge's native calls are cancelled
+with the old JS context, so the wait stops and an automatic 3DS challenge that is open closes; on iOS the wait runs
+on to its end and its states go nowhere. Nothing is charged twice either way: after the reload, read
+`getChargeState()` or `getPaymentOutcome()` on the session, which stays, before you offer to pay again.
+
+### Error callback
+
+`errorCallback` in the config gets each error the native SDK reports, once, for central logging:
+
+```ts
+GopaySDK.initialize({ environment: 'sandbox', clientId, shareableKey, errorCallback: (error) => log(error) });
+```
+
+- The error is also thrown by the call as usual; the callback does not replace catching it. It comes as an
+  event, so it may arrive a moment after the call has thrown.
+- Not every `GopayError` a call throws reaches it. The native SDKs leave out `PAYMENT_007` and `PAYMENT_011`,
+  which are outcomes of a payment window rather than failures. The errors the bridge makes itself never reach it:
+  `AUTH_013` of a closed handle or of a session the native SDK no longer has, and `VALIDATION_007` of an unknown
+  `threeDSMode`. On Android a failed `initialize` (`CONFIG_006`) reaches the callback of that config; on iOS
+  `initialize` does not fail and the first request reports it.
+- Each `initialize` replaces the callback; one without `errorCallback` removes it. An error the native SDK
+  reports just before a second `initialize` replaces the callback may reach neither callback; the call throws it
+  all the same. A callback that throws is logged with `console.error`. After a reload, call `initialize` again:
+  until then no callback is set in JS.
+- The callback never changes what `initialize` does with the open sessions: a second `initialize` with the same
+  connection keeps them, with a callback or without one.
 
 ### Errors
 

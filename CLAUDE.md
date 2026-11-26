@@ -50,6 +50,18 @@ Rules:
   form and its three calls, where the native SDKs take `nil` for the form that was active last. Race tests answer each native call in a step of its
   own, in both orders; `src/__tests__/sessions.model.test.ts` runs seeded random interleavings against a model of
   the native registry and checks the invariants in its header. Keep that model true to the native SDKs.
+- **Callbacks are module events, paired by id.** Expo functions take no JS function, so `onStateChange`,
+  `onActionRequired` and `errorCallback` are events (`onChargeStateChange`, `onChargeActionRequired`,
+  `onGopayError`, internal names; `src/callbacks.ts`). JS makes up an id for each `awaitChargeState` call and each
+  `initialize` with an `errorCallback` (a prefix drawn per JS context, so that after a reload an old native call
+  never matches a new id), passes it to native, and native sends it back in every event; JS listens only during the
+  call and drops events of other ids. Native sends an event only for a callback JS has. Expo does not order an event
+  against a function's answer, so `sessionAwaitChargeState` answers `{ result | error, events }` with the number of
+  events it sent, and JS settles the call once that many arrived. A callback that throws is caught and logged with
+  `console.error`; the wait goes on as native runs it. `errorCallback` keeps the callbacks of the last successful
+  `initialize` and of failed ones after it (Android reports a failed `initialize` to the new config's callback and
+  keeps the old one), as the native SDKs do; both native SDKs compare the connection, not the callback, so a new
+  callback per `initialize` never closes a session.
 - **Before `initialize`** the Android bridge checks `GopaySDK.isInitialized()` and answers as iOS does (no session,
   nothing to close) instead of the native `CONFIG_001`.
 - **The card form is hosted, not copied.** `PaymentCardForm` (`src/PaymentCardForm.tsx`) renders the view
