@@ -28,7 +28,8 @@ Rules:
   native. Only the JWE and the card metadata go to JS; `payment_secret` only goes in when a
   session starts and is never logged.
   The card form view follows the same rule: no prop, event or function writes into the form or
-  reads from it, not even for tests or the example (no `devFill`); its only event is its height.
+  reads from it, not even for tests or the example (no `devFill`). Out of the form come only its
+  height, its overall validity and the submit flag (`onSubmitAttemptedChange`), nothing else.
   The card is typed by hand. JWE is never logged; the example shows only its length and parts.
 
 ## How the bridge works
@@ -73,11 +74,22 @@ Rules:
   `PaymentCardForm` in a `ComposeView` that uses the lifecycle and saved state owners of its window (the Activity's
   or the dialog's) and sets none. Where Compose would throw (no owner above the view, or no lifecycle owner above
   the child of `android.R.id.content`, where Compose creates the window recomposer), the form is left out with one sentence in the debug log. No field, validator or look of the form
-  lives here. The native view measures the form at the width React Native gives, never at a width of 0 (the
-  parent gives the width; the component warns in development) and on Android against an unbounded height and never
-  while the `ComposeView` has no window, which throws. It reports the height through the internal event
-  `onFormHeightChange`; the component applies it unless `style` sets a height. Registration, the wipe on unmount and
-  `FLAG_SECURE` are the native form's own.
+  lives here: the props go to the native `PaymentCardForm` under their own names, the theme mapper
+  (`PaymentCardFormProps.swift`, `PaymentCardFormProps.kt`) sets only the keys JS sent and fills in no default, and
+  a prop JS leaves out is not passed (the views then use the SDK's default theme and their own copies of the SDK's
+  defaults for `validation` and `allowsAutofill`, `hidden` and `false`, which the native SDKs give no way to read:
+  keep them equal to the SDK's). The theme numbers have the limits of `PAYMENT_CARD_FORM_THEME_LIMITS`, checked in
+  JS and again in both mappers, and `src/__tests__/cardFormMappers.test.ts` holds both mappers to the keys and
+  limits of JS. A new prop goes into the same SwiftUI view or Compose call, so the card stays; never key the form by
+  a prop. `src/cardForm.ts` drops a theme key or prop the form cannot use, with a warning in development, before it
+  crosses. The native view measures the form at the width React Native gives, never at a width of 0 (the parent
+  gives the width; the component warns in development) and on Android against an unbounded height and never while
+  the `ComposeView` has no window, which throws. It reports the height through the internal event
+  `onFormHeightChange`; the component applies it unless `style` sets a height. The internal events
+  `onFormValidityChange` (only changes) and `onFormSubmitAttemptedChange` (only while JS sets `submitAttempted`; the
+  view holds the value it reported until JS answers with its number in the internal prop `submitAttemptedAck`, then
+  the value JS sent is the flag again; Android also reports `false` when the form leaves the window, as the iOS form
+  does) carry one boolean each. Registration, the wipe on unmount and `FLAG_SECURE` are the native form's own.
 - **Models** are converted by hand on both sides (`bridged` in Swift, `Bridged.kt`), with the native property
   names, enums as their raw values and no entry for a null. `PaymentDetails.paymentSecret` never crosses.
 - `GOPAY_ERROR_CODES` in `src/GopayError.ts` is compared with `sdk/docs/ERROR_CODES.md` of both native repos

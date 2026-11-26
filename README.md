@@ -12,8 +12,8 @@ React Native SDK for charging GoPay payments from a mobile app, for the GoPay Pa
 that wraps the native [iOS SDK](https://github.com/gopaycommunity/gopay-ios-sdk) and
 [Android SDK](https://github.com/gopaycommunity/gopay-android-sdk) (both 3.1.1). So far it configures the SDK, runs
 payment sessions (reading the payment, its outcome, the charge and the QR payment details), hosts the native card
-form, which turns the card into a JWE, and charges a card (a JWE or a card token) with 3DS. The form's theme and
-other props and wallets come next.
+form with its theme, languages and validation, which turns the card into a JWE, and charges a card (a JWE or a card
+token) with 3DS. Wallets come next.
 
 ---
 
@@ -58,6 +58,10 @@ await session.close();
   `getQrPaymentInfo(format?)` and `close()`. In JS a session is a handle on the native session of its
   `paymentId`, and several handles may share one session (see below). A call on a closed handle, or on a session
   the native SDK no longer has, fails with `AUTH_013`.
+- **`PaymentCardForm`**: `formId`, `style`, `theme`, `locale`, `localeStrings`, `validation`, `allowsAutofill`,
+  `onValidityChange`, `submitAttempted` and `onSubmitAttemptedChange` ([Card form](#card-form),
+  [Card form props](#card-form-props)); the form is submitted with `GopaySDK.submitCardForm(formId)` or
+  `submitCardFormWithMetadata(formId)` and emptied with `clearCardFormData(formId)`.
 - **Models** (`PaymentDetails`, `PaymentOutcome`, `ChargePaymentResponse`, `QrPaymentDetails`, …) have the
   property names of the native types. Enums are string literals with the gateway's values, `'UNKNOWN'` included
   where the native SDKs map a value they do not know to it. `PaymentDetails` has no `paymentSecret`: no secret
@@ -123,11 +127,11 @@ import { GopaySDK, PaymentCardForm } from '@gopaycz/gopay-react-native-sdk';
 const jwe = await GopaySDK.submitCardForm('checkout');
 ```
 
-- **`PaymentCardForm`** takes `formId` and `style`. `formId` is required here and in the three calls, unlike in
-  the native SDKs, where a missing id means the form that was active last: a deliberate narrowing. Keep one form
-  on screen per `formId`: a second form under the same id takes it over, and what the user types into the first
-  one goes nowhere. Changing `formId` on a mounted form moves the form and the card the user has typed to the new
-  id.
+- **`PaymentCardForm`** takes `formId`, `style` and the props in [Card form props](#card-form-props). `formId`
+  is required here and in the three calls, unlike in the native SDKs, where a missing id means the form that was
+  active last: a deliberate narrowing. Keep one form on screen per `formId`: a second form under the same id takes
+  it over, and what the user types into the first one goes nowhere. Changing `formId` on a mounted form moves the
+  form and the card the user has typed to the new id.
 - **`GopaySDK.submitCardForm(formId)`** resolves with the JWE. Send it to your backend promptly and use it for a
   single payment: the gateway accepts each JWE once and within 10 minutes of its creation. Do not log it. On
   success the SDK drops the card and empties the form; a failure leaves the card as the user typed it.
@@ -172,6 +176,138 @@ which in React Native is the window of the whole app: no screenshots or screen r
 form is mounted. The flag comes off when the form unmounts, unless the window had it before. In a debuggable build
 the SDK does not set it, so screenshots keep working during development. On iOS the form covers itself in the app
 switcher and while the screen is recorded.
+
+### Card form props
+
+```tsx
+<PaymentCardForm
+  formId="checkout"
+  theme={{ labelColor: '#6A1B9A', inputBorderRadius: 12 }}
+  locale="en"
+  validation="onSubmit"
+  allowsAutofill
+  onValidityChange={setPayEnabled}
+/>
+```
+
+| Prop | Type | Left out |
+|---|---|---|
+| `theme` | `PaymentCardFormTheme` | the native look |
+| `locale` | `string` | `GopayConfig.locale`, then the device language, then Czech |
+| `localeStrings` | `GopayLocaleStrings` | the strings of `locale` |
+| `validation` | `'hidden' \| 'live' \| 'onSubmit'` | `'hidden'` |
+| `allowsAutofill` | `boolean` | `false` |
+| `onValidityChange` | `(isValid: boolean) => void` | |
+| `submitAttempted` | `boolean` | the form keeps the flag itself |
+| `onSubmitAttemptedChange` | `(attempted: boolean) => void` | |
+
+The names, values and defaults are those of the native `PaymentCardForm`. A prop left out is not passed, so the
+native default applies: the SDK's default theme, and for `validation` and `allowsAutofill` the bridge's copy of the
+SDK's defaults (`'hidden'`, `false`), which the native SDKs give no way to read. A new value of any prop applies to
+the form on screen: the card typed into it stays, and the form measures its height again. Out of the form come only
+its height, its overall validity and the submit flag, never anything about the card.
+
+**Theme.** `PaymentCardFormTheme` has the 28 keys the iOS and Android themes share, named as there (and after the
+GoPay web card form), all optional:
+
+- colors as hex strings, `#RRGGBB` or `#RRGGBBAA` (alpha last): `labelColor`, `inputTextColor`, `placeholderColor`,
+  `inputBorderColor`, `inputBackgroundColor`, `inputErrorBorderColor`, `errorTextColor`, `formBackgroundColor`;
+- lengths as numbers from 0 to 1000, points on iOS and dp on Android: `inputHeight`, `inputBorderWidth`,
+  `inputPaddingVertical`, `inputPaddingHorizontal`, `inputBorderRadius`, `errorMinHeight`, `errorSpacing`,
+  `groupSpacing`, `fieldSpacing`, `formPadding`;
+- type as numbers, points on iOS and sp on Android: `labelFontSize`, `inputFontSize`, `errorFontSize` above 0 up to
+  200, `labelLineHeight` above 0 up to 400, `labelLetterSpacing` from -100 to 100; weights as CSS numbers from 100
+  to 900: `labelFontWeight`, `inputFontWeight`;
+- `labelUppercase`, `labelHidden` as booleans and `fontFamily` as a font name.
+
+A key left out keeps the native default, including the colors that follow light and dark mode (the system colors
+on iOS, the app theme's colors on Android); the bridge fills in nothing. A key with a value the form cannot use (a
+color that is not hex, a number outside the ranges above, a key the iOS and Android themes do not share, such as
+Android's `helperTextColor`) is ignored, with a warning in development, and the form keeps its default there; the
+native views skip such a value too, so the form never fails on a theme. The limits are far above any real form;
+they keep a typo from reaching a layout that cannot hold it (Android measures in 32-bit floats).
+
+The default colors follow dark mode differently, as the native SDKs do. On iOS they change as soon as the system
+switches. On Android they come from the app theme's attributes when the form appears, and an Expo app does not
+recreate its Activity when dark mode switches (`uiMode` is in its `configChanges`), so a form with the default
+colors keeps those of the mode it appeared in until the Activity is recreated (a change of the font size, a restart).
+State the colors in `theme` where that matters.
+
+`fontFamily` is looked up differently on the two platforms, as the native SDKs and React Native do. iOS takes the
+name of a font face as `UIFont(name:)` knows it, its PostScript or full name (`Inter-Regular`). On iOS neither a
+family name (`Inter`) nor the name a font was loaded under with `expo-font` (the key in `useFonts`) is found, unless
+it is that PostScript name, although both work in a React Native `fontFamily` style. Android takes the name React
+Native knows for `fontFamily` in a style: the name a font was loaded under with `expo-font`, or the name of a file
+in `assets/fonts`. Android also takes a system family (`monospace`, `serif`). A name a platform does not find leaves
+the system font, with the weights. A name that works on both: load the font with `expo-font` under its PostScript
+name (`useFonts({ 'Inter-Regular': require('./Inter-Regular.ttf') })`) and pass that name. `labelFontWeight` and
+`inputFontWeight` apply to the font on both: iOS takes the bold face of the family from 600, Android the face of
+that weight where the font has one (a family registered with `expo-font`, `<name>_bold` in `assets/fonts` from 600)
+and otherwise draws the regular face heavier. Android looks the font up when the theme arrives, so render the form
+once the fonts are loaded (`useFonts` returns `true`); a font loaded later applies only with the next theme.
+
+**Language.** `locale` picks one of the SDK's languages by code (`'cs'`, `'en'`, `'de'`, …). `localeStrings` sets
+the strings directly and takes precedence over `locale`. It needs all 12 keys of `GopayLocaleStrings` (`panLabel`,
+`panPlaceholder`, `expLabel`, `expPlaceholder`, `cvvLabel`, `cvvPlaceholder`, `pay`, `panErrorPattern`,
+`expErrorPattern`, `cvvErrorPattern`, `patternErrorMessage`, `requiredErrorMessage`): a set with a key missing is
+ignored, with a warning in development, and the form follows `locale`. `pay` is for the app's own button; the form
+has none. The optional `screenCaptureNotice` is iOS only: the text the iOS form shows over itself while the screen
+is recorded or mirrored. Left out, that cover shows no text, as in the iOS SDK. Android has no such cover, it keeps
+the window out of captures (`FLAG_SECURE`), and ignores the key.
+
+**Validation.** `validation` decides when the form shows its own errors under the fields, in the language of the
+form: `'hidden'` never (the app shows its own); `'live'` for a field once the user is done with it, and after a
+submit for every field typed into, while an empty field is never marked in this mode; `'onSubmit'` for every
+invalid field, empty ones included, once a submit was attempted.
+
+On iOS, set `validation` (and whether you drive `submitAttempted`) before the form appears. The iOS SDK keeps the
+mode the form appeared with for what `submitCardForm` and `clearCardFormData` do to the submit flag: a form that
+appeared with `'hidden'` and was switched to `'onSubmit'` shows no errors on a submit, and one that appeared without
+a driven flag does not lower yours when it is emptied. The fields show the new mode at once; for the rest, mount the
+form again (a `key` that changes with the mode). Android takes a new mode at once.
+
+**`onValidityChange`** is told whether the card in the form passes its validation: when the form appears, whenever
+that flips, and `false` when the form leaves. Use it to enable the pay button. On Android a configuration change
+that recreates the Activity (a change of the font size or the language; a rotation does not recreate it in a
+default Expo app) is the native form's own case: the form that leaves reports nothing, and the form that comes back
+reports the card it took over. iOS has no such case.
+
+**`submitAttempted`** is the flag by which `'onSubmit'` shows the errors of every invalid field and `'live'` those
+of every field typed into: whether a submit was attempted since the fields were last emptied. Left out, the form
+keeps it: `submitCardForm` raises it, emptying the form (a successful submit, `clearCardFormData`) lowers it. Set it
+to raise the errors yourself, for example when your pay button is tapped before you call the SDK. Then the value you
+pass is the flag, as in the native SDKs: `onSubmitAttemptedChange` tells you when the SDK changes it (`false` also
+when the mounted form leaves the window, a screen a navigator detaches or `removeClippedSubviews`, on both
+platforms; when you unmount the component, no event reaches it, so lower your flag yourself there), and you store
+the value and pass it back, or the flag stays as you set it. Store it in the handler itself, synchronously, as
+`setAttempted` below does. Passing it back raises no new event. Until the component renders after the event, the
+render your stored value arrives with, the form keeps the value it reported, so that a second change right after it,
+a failed `submitCardForm` and `clearCardFormData` in its `catch`, is not lost. `onSubmitAttemptedChange` is told
+nothing while `submitAttempted` is left out.
+
+The platforms differ here, as the native SDKs do:
+
+- `submitCardForm` reports `true` on iOS only in `'live'` and `'onSubmit'`; on Android in `'hidden'` too.
+- On iOS, decide before the form appears whether you drive the flag (see Validation).
+- When you stop driving it (pass `undefined` after a value), the iOS form goes back to its own flag as it was before
+  you drove it, while the Android form starts from the last value it showed.
+- On Android below native SDK 3.2.0, a `submitCardForm` that fails at once (an invalid card) followed by
+  `clearCardFormData` within the same frame may leave the flag `true` on the emptied form: the Android SDK judges the
+  clear against the flag of the last composition. Lower your flag yourself after such a clear.
+
+```tsx
+const [attempted, setAttempted] = useState(false);
+
+<PaymentCardForm
+  formId="checkout"
+  validation="onSubmit"
+  submitAttempted={attempted}
+  onSubmitAttemptedChange={setAttempted}
+/>;
+```
+
+**`allowsAutofill`** lets the system offer a saved card for the card number and the expiry: iOS autofill (the
+expiry from iOS 17), Android autofill services. Never the CVV.
 
 ### Paying by card
 
@@ -324,8 +460,10 @@ build the checkout runs its effect once.
 
 The card form section shows `PaymentCardForm` with the id `checkout` (in `<StrictMode>` too), buttons for
 `submitCardForm`, `submitCardFormWithMetadata` and `clearCardFormData`, and one that unmounts and mounts the form
-again. Type the card into the form by hand; the result shows only the length of the JWE and how many parts it has,
-never the JWE itself. A successful submit needs the merchant's keys in `example/.env.local`.
+again. Switches under the form set its `theme` (the default or one with all 28 keys), `locale`, `validation`,
+`allowsAutofill` and a driven `submitAttempted`, and the line under it shows `onValidityChange` and
+`onSubmitAttemptedChange`. Type the card into the form by hand; the result shows only the length of the JWE and
+how many parts it has, never the JWE itself. A successful submit needs the merchant's keys in `example/.env.local`.
 
 If CocoaPods fails during prebuild, run it with `LANG=en_US.UTF-8`.
 
