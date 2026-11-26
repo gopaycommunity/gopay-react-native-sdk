@@ -7,6 +7,8 @@ import {
 import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { CardCharge } from './CardCharge';
+
 /** The form's id, the same for the component and the three calls. */
 const CARD_FORM_ID = 'checkout';
 
@@ -79,8 +81,11 @@ const describeJwe = (jwe: string) =>
  * The card is typed by hand into the form; nothing in JS writes into it or reads it. The JWE is
  * never shown, only its length and parts; the card's metadata is shown as JSON.
  */
-export function CardFormCheckout(props: { output: (text: string) => void }) {
-  const { output } = props;
+export function CardFormCheckout(props: {
+  output: (text: string) => void;
+  session: PaymentSession | null;
+}) {
+  const { output, session } = props;
   const [mounted, setMounted] = useState(true);
 
   const run = (label: string, call: () => Promise<string> | string) => async () => {
@@ -138,6 +143,7 @@ export function CardFormCheckout(props: { output: (text: string) => void }) {
           </Pressable>
         ))}
       </View>
+      <CardCharge formId={CARD_FORM_ID} session={session} />
     </View>
   );
 }

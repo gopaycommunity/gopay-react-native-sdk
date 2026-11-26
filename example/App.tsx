@@ -8,6 +8,7 @@ import { requireNativeModule } from 'expo';
 import { StrictMode, useCallback, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
+import { logErrorCallback } from './CardCharge';
 import { CardFormCheckout, Checkout } from './Checkout';
 
 // A tool for checking the bridge by hand, not a demo. The merchant's keys come from
@@ -17,6 +18,7 @@ const config: GopayConfig = {
   clientId: process.env.EXPO_PUBLIC_GOPAY_CLIENT_ID || undefined,
   shareableKey: process.env.EXPO_PUBLIC_GOPAY_SHAREABLE_KEY || undefined,
   debugLoggingEnabled: true,
+  errorCallback: logErrorCallback,
 };
 
 /** The native module as it is, to show the raw envelope of a call on a session that does not exist. */
@@ -233,7 +235,7 @@ export default function App() {
         )}
         {/* In Strict Mode, so that a double effect run of the form would show. */}
         <StrictMode>
-          <CardFormCheckout output={setOutput} />
+          <CardFormCheckout output={setOutput} session={session} />
         </StrictMode>
 
         <Text style={styles.small}>Two starts: {pair.length} handle(s) kept</Text>
