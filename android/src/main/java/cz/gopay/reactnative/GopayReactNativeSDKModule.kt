@@ -243,6 +243,8 @@ class NativeConfig : Record {
   @Field val shareableKey: String? = null
   @Field val debugLoggingEnabled: Boolean = false
   @Field val locale: String? = null
+  /** Locale code to its strings; JS sends only complete sets, and one that is not is skipped here. */
+  @Field val customLocales: Map<String, Any?>? = null
   @Field val requestTimeoutMs: Double = 30_000.0
   @Field val errorCallbackId: String? = null
 
@@ -258,7 +260,10 @@ class NativeConfig : Record {
     requestTimeoutMs = requestTimeoutMs.toLong(),
     debugLoggingEnabled = debugLoggingEnabled,
     errorCallback = errorCallback,
-    locale = locale
+    locale = locale,
+    customLocales = customLocales.orEmpty().mapNotNull { (code, strings) ->
+      bridgedLocaleStrings(strings.asStringMap())?.let { code to it }
+    }.toMap()
   )
 }
 

@@ -150,6 +150,10 @@ internal fun bridgedLocaleStrings(values: Map<String, Any?>?): GopayLocaleString
   )
 }
 
+/** A map from JS with string keys, or null for anything else. */
+internal fun Any?.asStringMap(): Map<String, Any?>? =
+  (this as? Map<*, *>)?.entries?.associate { (key, value) -> key.toString() to value }
+
 /** `'hidden'`, `'live'` or `'onSubmit'`; anything else, or nothing, is the SDK's default `HIDDEN`. */
 internal fun bridgedValidation(value: String?): PaymentCardFormValidationDisplay = when (value) {
   "live" -> PaymentCardFormValidationDisplay.LIVE
