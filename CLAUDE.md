@@ -82,18 +82,62 @@ Rules:
   JS and again in both mappers, and `src/__tests__/cardFormMappers.test.ts` holds both mappers to the keys and
   limits of JS. A new prop goes into the same SwiftUI view or Compose call, so the card stays; never key the form by
   a prop. `src/cardForm.ts` drops a theme key or prop the form cannot use, with a warning in development, before it
-  crosses. The native view measures the form at the width React Native gives, never at a width of 0 (the parent
-  gives the width; the component warns in development) and on Android against an unbounded height and never while
-  the `ComposeView` has no window, which throws. It reports the height through the internal event
-  `onFormHeightChange`; the component applies it unless `style` sets a height. The internal events
-  `onFormValidityChange` (only changes) and `onFormSubmitAttemptedChange` (only while JS sets `submitAttempted`; the
-  view holds the value it reported until JS answers with its number in the internal prop `submitAttemptedAck`, then
-  the value JS sent is the flag again; Android also reports `false` when the form leaves the window, as the iOS form
-  does) carry one boolean each. Registration, the wipe on unmount and `FLAG_SECURE` are the native form's own.
+  crosses, and so does an incomplete entry of `GopayConfig.customLocales`, which the native configs turn into
+  `GopayLocaleStrings` with the mapper of `localeStrings`. The native view measures the form at the width React
+  Native gives, never at a width of 0 (the parent gives the width; the component warns in development) and on
+  Android against an unbounded height and never while the `ComposeView` has no window, which throws. It reports the
+  height through the internal event `onFormHeightChange`; the component applies it unless `style` sets a height. The
+  internal events `onFormValidityChange` (only changes) and `onFormSubmitAttemptedChange` (only while JS sets
+  `submitAttempted`; the view holds the value it reported until JS answers with its number in the internal prop
+  `submitAttemptedAck`, then the value JS sent is the flag again; Android also reports `false` when the form leaves
+  the window, as the iOS form does) carry one boolean each. Registration, the wipe on unmount and `FLAG_SECURE` are
+  the native form's own.
 - **Models** are converted by hand on both sides (`bridged` in Swift, `Bridged.kt`), with the native property
   names, enums as their raw values and no entry for a null. `PaymentDetails.paymentSecret` never crosses.
 - `GOPAY_ERROR_CODES` in `src/GopayError.ts` is compared with `sdk/docs/ERROR_CODES.md` of both native repos
   when they are checked out next to this one; otherwise (CI) that test is skipped.
+
+## Native SDK differences the bridge works around or documents
+
+The ticket that raises `gopayNativeSdkVersion` goes through this list and removes from RN what the new native
+version closed: the workaround in the bridge and the sentence in the README. The codes are those of the
+coordination's backlog.
+
+- **R2** Starting a payment session that already exists answers `AUTH_012` on both platforms. JS asks
+  `hasPaymentSession` first and turns an `AUTH_012` of a racing start into a handle (`src/sessions.ts`, README
+  "Starting the same payment twice"). Remove the question and the `AUTH_012` branch once the native start returns
+  the existing session.
+- **R3** The native default request timeout differs (iOS 60 s, Android 30 s). The bridge always sends
+  `requestTimeoutMs`, 30000 unless set (`toNativeConfig` in `src/GopaySDK.ts`, README `GopayConfig`). Once both
+  defaults are the same, send it only when the app sets it and drop the README note.
+- **R5** `clearCardFormData` before `initialize` does nothing on Android (no instance), while iOS empties the form.
+  Left as it is: a comment in `GopayReactNativeSDKModule.kt` and a sentence in the README section "Card form".
+  Remove both once Android clears the form before `initialize`.
+- Before `initialize` the Android SDK answers `CONFIG_001` where iOS has an empty registry. The Android bridge checks
+  `GopaySDK.isInitialized()` and answers as iOS (`sdkOrNull` in `GopayReactNativeSDKModule.kt`). Remove once Android
+  answers as iOS.
+- **R9** iOS takes `fontFamily` only as the PostScript or full name of a face (`UIFont(name:)`), not a family name
+  or an `expo-font` alias; Android takes React Native's names. README "Card form props", `fontFamily` paragraph.
+  Remove the iOS sentences once the iOS SDK resolves family names.
+- **R10** On iOS, `validation` and a driven `submitAttempted` changed on a form on screen do not reach what
+  `submitCardForm` and `clearCardFormData` do to the flag (the SDK keeps the closures of `onAppear`). README
+  "Validation" and the platform list under `submitAttempted`, JSDoc of `validation` and `submitAttempted` in
+  `src/PaymentCardForm.tsx`. Remove once the iOS SDK reads the current props.
+- **R11** On Android the default colors come from the app theme when the form appears, and an Expo app does not
+  recreate its Activity when dark mode switches, so they keep the old mode. README "Card form props", dark mode
+  paragraph. Remove once the Android SDK follows the configuration.
+- **R12** The driven `submitAttempted` differs: `submitCardForm` reports `true` in `'hidden'` on Android only; a form
+  leaving the window lowers the host's flag on iOS but only its own on Android; stopping to drive it restores the
+  form's old flag on iOS and keeps the last value on Android. The bridge reports `false` when an Android form with a
+  driven `true` leaves the window (`onDetachedFromWindow` in `PaymentCardFormView.kt`); the rest is in the README
+  list under `submitAttempted` and the JSDoc of `onSubmitAttemptedChange`. Remove the override and the sentences
+  once the native SDKs agree. The override skips an Activity being recreated, where the SDK parks the card and the
+  flag. Also on Android below 3.2.0 (fixed in GPMOB-177), a `submitCardForm` that fails at once and a
+  `clearCardFormData` in the same frame may leave a driven flag `true`: the SDK compares with the flag of the last
+  composition (`rememberUpdatedState`). README list under `submitAttempted` and JSDoc of `submitAttempted`; remove
+  both with the raise to 3.2.0, no workaround in the bridge.
+- **X7** A second `initialize` adds its `customLocales` but removes none, on both platforms. README "Custom
+  locales" and JSDoc of `GopayConfig.customLocales`. Remove the sentences once `initialize` replaces them.
 
 ## Conventions
 

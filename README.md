@@ -51,8 +51,9 @@ await session.close();
   `startPaymentSession({ paymentId, paymentSecret, scope? })`, `getPaymentSession(paymentId)` (a handle or
   `null`) and `closeAllPaymentSessions()`.
 - **`GopayConfig`**: `environment` (`'production'`, `'sandbox'` or `{ development: baseUrl }`), `clientId`,
-  `shareableKey`, `debugLoggingEnabled`, `locale`, `requestTimeoutMs`, which is 30000 by default on both
-  platforms (the native default is 60 s on iOS), and `errorCallback` (see below).
+  `shareableKey`, `debugLoggingEnabled`, `locale`, `customLocales` (the card form's own translations, see
+  [Card form props](#card-form-props)), `requestTimeoutMs`, which is 30000 by default on both platforms (the
+  native default is 60 s on iOS), and `errorCallback` (see below).
 - **`PaymentSession`**: `paymentId`, `getStatus()`, `getPaymentOutcome()`, `chargeWithEncryptedCard(jwe, options?)`,
   `chargeWithCardToken(cardToken, options?)`, `getChargeState()`, `awaitChargeState(options?)`,
   `getQrPaymentInfo(format?)` and `close()`. In JS a session is a handle on the native session of its
@@ -254,6 +255,24 @@ ignored, with a warning in development, and the form follows `locale`. `pay` is 
 has none. The optional `screenCaptureNotice` is iOS only: the text the iOS form shows over itself while the screen
 is recorded or mirrored. Left out, that cover shows no text, as in the iOS SDK. Android has no such cover, it keeps
 the window out of captures (`FLAG_SECURE`), and ignores the key.
+
+**Custom locales.** `GopayConfig.customLocales` registers your own translations with `initialize`, by locale code,
+each a complete `GopayLocaleStrings`. They take precedence over the SDK's language of the same code, and `locale`
+on the form (or in the config) selects them:
+
+```tsx
+GopaySDK.initialize({ environment: 'sandbox', clientId, shareableKey, customLocales: { sk: slovakStrings } });
+
+<PaymentCardForm formId="checkout" locale="sk" />;
+```
+
+The native SDKs keep only the language part of a code (`'sk-SK'` is `'sk'`), so keep one code per language: two
+that reduce to one (`'cs'` and `'cs-CZ'`) both go to the native SDKs, with a warning in development, and which of
+them the form uses is not defined. An entry with a key missing is left out, with a warning in development, and
+`initialize` registers the others. A later `initialize` adds its entries
+and replaces those of the same code, but removes none: an entry the new config leaves out stays registered on both
+platforms (checked on iOS and Android) until the app is restarted, also after a reload of the JS bundle. To take a
+translation back, register the replacement under the same code.
 
 **Validation.** `validation` decides when the form shows its own errors under the fields, in the language of the
 form: `'hidden'` never (the app shows its own); `'live'` for a field once the user is done with it, and after a
@@ -460,7 +479,8 @@ build the checkout runs its effect once.
 
 The card form section shows `PaymentCardForm` with the id `checkout` (in `<StrictMode>` too), buttons for
 `submitCardForm`, `submitCardFormWithMetadata` and `clearCardFormData`, and one that unmounts and mounts the form
-again. Switches under the form set its `theme` (the default or one with all 28 keys), `locale`, `validation`,
+again. Switches under the form set its `theme` (the default or one with all 28 keys), `locale` (`xx` is the custom
+locale `initialize (customLocales xx)` registers), `validation`,
 `allowsAutofill` and a driven `submitAttempted`, and the line under it shows `onValidityChange` and
 `onSubmitAttemptedChange`. Type the card into the form by hand; the result shows only the length of the JWE and
 how many parts it has, never the JWE itself. A successful submit needs the merchant's keys in `example/.env.local`.
