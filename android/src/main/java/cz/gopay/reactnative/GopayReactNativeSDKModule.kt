@@ -3,16 +3,23 @@ package cz.gopay.reactnative
 import cz.gopay.sdk.GopaySDK
 import cz.gopay.sdk.config.GopayConfig
 import cz.gopay.sdk.config.GopayEnvironment
+import cz.gopay.sdk.exception.ErrorCallback
 import cz.gopay.sdk.exception.GopayErrorCodes
 import cz.gopay.sdk.exception.GopaySDKException
+import cz.gopay.sdk.model.ChallengePreference
+import cz.gopay.sdk.model.ChargePaymentResponse
 import cz.gopay.sdk.model.QrCodeFormat
+import cz.gopay.sdk.session.AwaitChargeOptions
 import cz.gopay.sdk.session.PaymentSession
+import cz.gopay.sdk.session.ThreeDSMode
 import expo.modules.kotlin.exception.Exceptions
 import expo.modules.kotlin.functions.Coroutine
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import expo.modules.kotlin.records.Field
 import expo.modules.kotlin.records.Record
+import java.util.concurrent.atomic.AtomicInteger
+import kotlin.math.ceil
 
 /**
  * The bridge to `GopaySDK` of the native Android SDK. It adds no payment logic.
@@ -24,10 +31,16 @@ import expo.modules.kotlin.records.Record
  *
  * A session is addressed by its `paymentId`; the SDK keeps the sessions. Neither the
  * `payment_secret` nor a token or key goes back to JS or into a log.
+ *
+ * The SDK's callbacks reach JS as the module's events, each with the id JS gave the call or the
+ * callback (see `src/callbacks.ts`). `awaitChargeState` answers with how many events it sent,
+ * because Expo does not order an event against the answer of a function.
  */
 class GopayReactNativeSDKModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("GopayReactNativeSDK")
+
+    Events("onChargeStateChange", "onChargeActionRequired", "onGopayError")
 
     // `GopaySDK.version` of the linked native SDK.
     Constant("version") {
@@ -40,12 +53,14 @@ class GopayReactNativeSDKModule : Module() {
 
     // The Activity in front when the module has one, so that the SDK knows the screen at once;
     // otherwise the application Context, and the SDK learns the screen at its next onResume.
+    // A config with the same connection keeps the open sessions whatever its callback: the SDK
+    // compares the connection only (not `GopayConfig.equals`, which takes in the callback).
     Function("initialize") { config: NativeConfig ->
       envelope {
         val context = appContext.currentActivity
           ?: appContext.reactContext?.applicationContext
           ?: throw Exceptions.ReactContextLost()
-        GopaySDK.initialize(context, config.gopayConfig())
+        GopaySDK.initialize(context, config.gopayConfig(errorCallback(config.errorCallbackId)))
         null
       }
     }
@@ -92,6 +107,46 @@ class GopayReactNativeSDKModule : Module() {
       }
     }
 
+    // The card charges. The JWE and the token go to the SDK only; the browser data is the SDK's.
+    AsyncFunction("sessionChargeWithEncryptedCard") Coroutine { paymentId: String, jwe: String, challengePreference: String? ->
+      envelope {
+        session(paymentId)
+          .chargeWithEncryptedCard(jwe, challengePreference = challengePreferenceOf(challengePreference))
+          .bridged()
+      }
+    }
+
+    AsyncFunction("sessionChargeWithCardToken") Coroutine { paymentId: String, cardToken: String, challengePreference: String? ->
+      envelope {
+        session(paymentId)
+          .chargeWithCardToken(cardToken, challengePreference = challengePreferenceOf(challengePreference))
+          .bridged()
+      }
+    }
+
+    // Each callback JS asked for sends an event with `callId`; the answer says how many were sent.
+    AsyncFunction("sessionAwaitChargeState") Coroutine { paymentId: String, callId: String, options: NativeAwaitChargeOptions ->
+      val sent = AtomicInteger()
+      val onStateChange: ((ChargePaymentResponse) -> Unit)? = if (options.reportStateChanges) {
+        { charge ->
+          sent.incrementAndGet()
+          sendEvent("onChargeStateChange", mapOf("callId" to callId, "charge" to charge.bridged()))
+        }
+      } else null
+      val onActionRequired: ((String) -> Unit)? = if (options.reportActionRequired) {
+        { redirectUrl ->
+          sent.incrementAndGet()
+          sendEvent("onChargeActionRequired", mapOf("callId" to callId, "redirectUrl" to redirectUrl))
+        }
+      } else null
+      val answer = envelope {
+        // The session first, as the SDK answers a closed session whatever the options say.
+        val session = session(paymentId)
+        session.awaitChargeState(options.awaitChargeOptions(onStateChange, onActionRequired)).bridged()
+      }
+      answer + ("events" to sent.get())
+    }
+
     // Closing a session the SDK no longer has does nothing, as closing a closed session does.
     AsyncFunction("sessionClose") { paymentId: String ->
       envelope {
@@ -129,6 +184,14 @@ class GopayReactNativeSDKModule : Module() {
   }
 
   /**
+   * `GopayConfig.errorCallback` for an `errorCallback` of JS, registered there as [callbackId]:
+   * it sends each error as `onGopayError`, in the shape of the envelope's error.
+   */
+  private fun errorCallback(callbackId: String?): ErrorCallback? = callbackId?.let { id ->
+    ErrorCallback { error -> sendEvent("onGopayError", mapOf("callbackId" to id, "error" to error.bridged())) }
+  }
+
+  /**
    * The SDK, or null before `initialize`. `getInstance()` would throw `CONFIG_001` there, where
    * the iOS SDK has an empty registry: no session, nothing to close. The bridge answers as iOS does.
    */
@@ -151,9 +214,10 @@ class NativeConfig : Record {
   @Field val debugLoggingEnabled: Boolean = false
   @Field val locale: String? = null
   @Field val requestTimeoutMs: Double = 30_000.0
+  @Field val errorCallbackId: String? = null
 
   /** Throws `CONFIG_006` for a development base URL the SDK refuses. */
-  fun gopayConfig() = GopayConfig(
+  fun gopayConfig(errorCallback: ErrorCallback?) = GopayConfig(
     environment = when (environment) {
       "production" -> GopayEnvironment.PRODUCTION
       "development" -> GopayEnvironment.DEVELOPMENT(baseUrl ?: "")
@@ -163,9 +227,58 @@ class NativeConfig : Record {
     shareableKey = shareableKey,
     requestTimeoutMs = requestTimeoutMs.toLong(),
     debugLoggingEnabled = debugLoggingEnabled,
+    errorCallback = errorCallback,
     locale = locale
   )
 }
+
+/** `AwaitChargeOptions` as JS sends it. A time left out keeps the SDK's default. */
+class NativeAwaitChargeOptions : Record {
+  @Field val intervalMs: Double? = null
+  @Field val initialTimeoutMs: Double? = null
+  @Field val threeDSMode: String? = null
+  @Field val returnUrl: String? = null
+  @Field val reportStateChanges: Boolean = false
+  @Field val reportActionRequired: Boolean = false
+
+  /**
+   * `activity` stays null: the SDK opens the challenge from the screen in front. The SDK judges
+   * the times, a non-positive one too, and the return URL, falling back to chargeReturnUrl.
+   *
+   * Throws `VALIDATION_007`, as the SDK does for a time that is not positive, for a `threeDSMode`
+   * that is neither of the two: taken as automatic, it would open a challenge the app meant to run.
+   */
+  fun awaitChargeOptions(
+    onStateChange: ((ChargePaymentResponse) -> Unit)?,
+    onActionRequired: ((String) -> Unit)?
+  ) = AwaitChargeOptions(
+    intervalMs = intervalMs?.let(::millis) ?: AwaitChargeOptions.DEFAULT_INTERVAL_MS,
+    initialTimeoutMs = initialTimeoutMs?.let(::millis) ?: AwaitChargeOptions.DEFAULT_INITIAL_TIMEOUT_MS,
+    threeDSMode = when (threeDSMode) {
+      null, "automatic" -> ThreeDSMode.AUTOMATIC
+      "manual" -> ThreeDSMode.MANUAL
+      else -> throw GopaySDKException(
+        code = GopayErrorCodes.VALIDATION_INVALID_INPUT,
+        message = "awaitChargeState needs threeDSMode 'automatic' or 'manual'"
+      )
+    },
+    returnUrl = returnUrl,
+    onStateChange = onStateChange,
+    onActionRequired = onActionRequired
+  )
+}
+
+/**
+ * Milliseconds from JS as the SDK takes them. A positive fraction rounds up, so that it stays
+ * positive as it does in the seconds of iOS. Zero, a negative value and NaN become 0 or less,
+ * which the SDK refuses with `VALIDATION_007` as the iOS SDK does; a huge value is capped at
+ * `Long.MAX_VALUE`.
+ */
+private fun millis(value: Double): Long = if (value > 0) ceil(value).toLong() else value.toLong()
+
+/** The SDK's `ChallengePreference` for its API value, or null for none. */
+private fun challengePreferenceOf(value: String?): ChallengePreference? =
+  ChallengePreference.entries.firstOrNull { it.name == value }
 
 /** The result of [body], or the `GopaySDKException` it throws as data. Anything else is rethrown. */
 internal inline fun envelope(body: () -> Any?): Map<String, Any?> = try {
@@ -174,6 +287,7 @@ internal inline fun envelope(body: () -> Any?): Map<String, Any?> = try {
   mapOf("error" to e.bridged())
 }
 
+/** Every field of the exception JS sees, as the envelope and the `onGopayError` event carry it. */
 private fun GopaySDKException.bridged(): Map<String, Any> = compact(
   "code" to code,
   "message" to (message ?: code),
