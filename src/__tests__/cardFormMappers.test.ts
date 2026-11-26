@@ -12,6 +12,13 @@ import {
   PAYMENT_CARD_FORM_THEME_LIMITS,
 } from '../cardForm';
 
+// Hoisted by Jest above the imports; `../index` loads the native module.
+jest.mock('expo', () => ({
+  NativeModule: class {},
+  requireNativeModule: () => ({}),
+  requireNativeView: () => 'NativePaymentCardForm',
+}));
+
 const read = (path: string) => readFileSync(join(__dirname, '..', '..', path), 'utf8');
 const swift = read('ios/PaymentCardFormProps.swift');
 const kotlin = read('android/src/main/java/cz/gopay/reactnative/PaymentCardFormProps.kt');
@@ -30,6 +37,24 @@ const keys = (source: string, pattern: RegExp) =>
   [...source.matchAll(pattern)].map((match) => match[1]!);
 
 const sorted = (values: readonly string[]) => [...values].sort();
+
+describe('the theme limits', () => {
+  it('are exported by the package, read-only, as the checks use them', () => {
+    const { PAYMENT_CARD_FORM_THEME_LIMITS: exported } =
+      require('../index') as typeof import('../index');
+    expect(exported).toBe(PAYMENT_CARD_FORM_THEME_LIMITS);
+    expect(exported).toEqual({ length: 1000, fontSize: 200, lineHeight: 400, letterSpacing: 100 });
+    // Read-only to TypeScript: declared `as const`. The typecheck leaves the tests out, so the
+    // declaration is read instead of an assignment that must not compile.
+    expect(
+      block(
+        read('src/cardForm.ts'),
+        'export const PAYMENT_CARD_FORM_THEME_LIMITS = {',
+        '} as const;'
+      )
+    ).toBeTruthy();
+  });
+});
 
 describe('the native mappers of the card form', () => {
   const themeKeys = sorted(PAYMENT_CARD_FORM_THEME_KEYS);

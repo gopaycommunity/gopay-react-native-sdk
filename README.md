@@ -226,7 +226,8 @@ on iOS, the app theme's colors on Android); the bridge fills in nothing. A key w
 color that is not hex, a number outside the ranges above, a key the iOS and Android themes do not share, such as
 Android's `helperTextColor`) is ignored, with a warning in development, and the form keeps its default there; the
 native views skip such a value too, so the form never fails on a theme. The limits are far above any real form;
-they keep a typo from reaching a layout that cannot hold it (Android measures in 32-bit floats).
+they keep a typo from reaching a layout that cannot hold it (Android measures in 32-bit floats). The package exports
+them, read-only, as `PAYMENT_CARD_FORM_THEME_LIMITS` (`length`, `fontSize`, `lineHeight`, `letterSpacing`).
 
 The default colors follow dark mode differently, as the native SDKs do. On iOS they change as soon as the system
 switches. On Android they come from the app theme's attributes when the form appears, and an Expo app does not

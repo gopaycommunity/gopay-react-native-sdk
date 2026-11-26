@@ -70,7 +70,6 @@ export function Checkout(props: {
   return <Text style={{ fontSize: 12, marginTop: 8 }}>Checkout mounted for {paymentId}</Text>;
 }
 
-/** A JWE described without showing it: its length and how many dot-separated parts it has. */
 /**
  * A theme with all 28 keys, far enough from the defaults that each key shows: compare iOS and
  * Android side by side. The font is a system one of each platform, so nothing has to be bundled.
