@@ -71,6 +71,56 @@ export interface ChargePaymentResponse {
   readonly failReason?: string;
 }
 
+/** The 3DS challenge preference a charge forwards to the gateway (`Payment-Card-Challenge-Preference`). */
+export type ChallengePreference = 'AUTO' | 'CHALLENGE_PREFERRED' | 'NO_CHALLENGE_PREFERRED';
+
+/** Options of a card charge. The browser data for 3DS is the device's; the native SDK fills it in. */
+export interface ChargeOptions {
+  /** Forwarded to the gateway as it is. Without it the charge sends none. */
+  readonly challengePreference?: ChallengePreference;
+}
+
+/** Whether `awaitChargeState` runs a 3DS challenge itself (`'automatic'`) or leaves it to the app. */
+export type ThreeDSMode = 'automatic' | 'manual';
+
+/**
+ * Options of `PaymentSession.awaitChargeState`, `AwaitChargeOptions` of the native SDKs. Every
+ * option left out takes the native default.
+ */
+export interface AwaitChargeOptions {
+  /** How long after one answer the next read goes out, in milliseconds. Default 1000. */
+  readonly intervalMs?: number;
+  /**
+   * How long the charge may stay undecided before the call fails with `PAYMENT_007`, in
+   * milliseconds from the call. Default 30000. Lifted while a 3DS challenge is open.
+   */
+  readonly initialTimeoutMs?: number;
+  /**
+   * Default `'automatic'`: the native SDK opens the 3DS challenge itself and polls on after it.
+   * Any other value than these two rejects the call with `VALIDATION_007`.
+   */
+  readonly threeDSMode?: ThreeDSMode;
+  /**
+   * The `callback.return_url` the payment was created with, where the automatic 3DS challenge
+   * ends. Without a usable one (missing, not `http(s)` or without a host) the native SDK waits for
+   * `GopaySDK.chargeReturnUrl` instead.
+   */
+  readonly returnUrl?: string;
+  /**
+   * Called with every charge state the call reads, the last one included, before the call
+   * resolves or rejects. An exception it throws is logged with `console.error` and does not end
+   * the call.
+   */
+  readonly onStateChange?: (charge: ChargePaymentResponse) => void;
+  /**
+   * Called once for each new `action.redirectUrl` the charge reports, before the call settles. In
+   * `'automatic'` mode the native SDK opens the challenge without waiting for it, so the challenge
+   * may be on screen already when it runs; in `'manual'` mode the challenge is the app's to run.
+   * An exception it throws is logged with `console.error` and does not end the call.
+   */
+  readonly onActionRequired?: (redirectUrl: string) => void;
+}
+
 /**
  * The payment as the gateway reports it. The native `paymentSecret` is left out on purpose: the
  * bridge never sends a secret back to JS.
