@@ -107,7 +107,8 @@ const CUSTOM_THEME: Required<PaymentCardFormTheme> = {
 };
 
 /** The values each switch goes through; `undefined` is the prop left out. */
-const LOCALES = [undefined, 'cs', 'en', 'de', 'sk'] as const;
+// 'xx' is the custom locale of the App's "initialize (customLocales xx)".
+const LOCALES = [undefined, 'cs', 'en', 'de', 'sk', 'xx'] as const;
 const VALIDATIONS: (PaymentCardFormValidation | undefined)[] = [
   undefined,
   'hidden',

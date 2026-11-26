@@ -21,6 +21,28 @@ const config: GopayConfig = {
   errorCallback: logErrorCallback,
 };
 
+/**
+ * A custom locale under a code the SDK does not have, every string marked so it shows which set the
+ * form uses. The plain initialize has none; the native SDKs keep it all the same (see the README).
+ */
+const CUSTOM_LOCALES: GopayConfig['customLocales'] = {
+  xx: {
+    panLabel: '[xx] Card',
+    panPlaceholder: '[xx] 0000',
+    expLabel: '[xx] Expiry',
+    expPlaceholder: '[xx] MM/YY',
+    cvvLabel: '[xx] Code',
+    cvvPlaceholder: '[xx] 000',
+    pay: '[xx] Pay',
+    panErrorPattern: '[xx] Bad card',
+    expErrorPattern: '[xx] Bad expiry',
+    cvvErrorPattern: '[xx] Bad code',
+    patternErrorMessage: '[xx] Bad format',
+    requiredErrorMessage: '[xx] Required',
+    screenCaptureNotice: '[xx] Hidden while recording',
+  },
+};
+
 /** The native module as it is, to show the raw envelope of a call on a session that does not exist. */
 const nativeModule = requireNativeModule<{
   sessionGetStatus(paymentId: string): Promise<unknown>;
@@ -77,6 +99,12 @@ export default function App() {
 
   const buttons: [string, () => Promise<void>][] = [
     ['initialize', run('initialize', () => GopaySDK.initialize(config))],
+    [
+      'initialize (customLocales xx)',
+      run('initialize (customLocales xx)', () =>
+        GopaySDK.initialize({ ...config, customLocales: CUSTOM_LOCALES })
+      ),
+    ],
     [
       'initialize (bad development URL)',
       run('initialize (bad development URL)', () =>
