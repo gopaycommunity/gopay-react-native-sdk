@@ -1,5 +1,6 @@
 import { NativeModule, requireNativeModule } from 'expo';
 
+import type { GopayLocaleStrings } from './cardForm';
 import type { Envelope, NativeError } from './envelope';
 import type {
   ChallengePreference,
@@ -24,6 +25,8 @@ export interface NativeConfig {
   shareableKey?: string;
   debugLoggingEnabled: boolean;
   locale?: string;
+  /** Complete sets of strings only, by locale code; see `GopayConfig.customLocales`. */
+  customLocales?: Record<string, GopayLocaleStrings>;
   /** Milliseconds; iOS gets seconds from the bridge. */
   requestTimeoutMs: number;
   /**

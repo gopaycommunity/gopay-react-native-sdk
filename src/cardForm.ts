@@ -294,26 +294,25 @@ export function sanitizeTheme(theme: unknown): PaymentCardFormTheme | undefined 
 }
 
 /**
- * The strings as they go to the native view, or `undefined` with a warning in development when one
- * of the 12 keys is missing or not a string: the native SDKs take only a complete set, so the form
- * then follows `locale` instead. A `screenCaptureNotice` that is not a string is left out.
+ * The strings as they cross the bridge, or `undefined` with a warning in development when one of
+ * the 12 keys is missing or not a string: the native SDKs take only a complete set, so the form
+ * then follows `locale` instead. A `screenCaptureNotice` that is not a string is left out. `name`
+ * and `instead` say in the warning which prop it is and what happens without it.
  */
-export function sanitizeLocaleStrings(strings: unknown): GopayLocaleStrings | undefined {
+export function sanitizeLocaleStrings(
+  strings: unknown,
+  name = 'PaymentCardForm localeStrings',
+  instead = 'the form follows locale instead'
+): GopayLocaleStrings | undefined {
   if (strings === undefined || strings === null) return undefined;
   if (!isPlainObject(strings)) {
-    warnOnce(
-      `PaymentCardForm localeStrings must be a plain object, got ${describeObject(strings)}: the ` +
-        'form follows locale instead.'
-    );
+    warnOnce(`${name} must be a plain object, got ${describeObject(strings)}: ${instead}.`);
     return undefined;
   }
   const record = strings;
   const missing = GOPAY_LOCALE_STRINGS_KEYS.filter((key) => typeof record[key] !== 'string');
   if (missing.length > 0) {
-    warnOnce(
-      `PaymentCardForm localeStrings needs every key as a string, missing ${missing.join(', ')}: ` +
-        'the form follows locale instead.'
-    );
+    warnOnce(`${name} needs every key as a string, missing ${missing.join(', ')}: ${instead}.`);
     return undefined;
   }
   const clean: Record<string, string> = {};
@@ -321,9 +320,63 @@ export function sanitizeLocaleStrings(strings: unknown): GopayLocaleStrings | un
   if (typeof record.screenCaptureNotice === 'string') {
     clean.screenCaptureNotice = record.screenCaptureNotice;
   } else if (record.screenCaptureNotice !== undefined && record.screenCaptureNotice !== null) {
-    warnOnce('PaymentCardForm localeStrings.screenCaptureNotice must be a string, it is ignored.');
+    warnOnce(`${name}.screenCaptureNotice must be a string, it is ignored.`);
   }
   return clean as unknown as GopayLocaleStrings;
+}
+
+/**
+ * `GopayConfig.customLocales` as it crosses the bridge: every entry whose strings are complete,
+ * under its code as given. An entry with a key missing is left out with a warning in development,
+ * the same check as `localeStrings`, so that `initialize` never fails on it. Not a plain object:
+ * none. Two codes the native SDKs read as one language (`'cs'` and `'cs-CZ'`) are both passed, with a
+ * warning: which of them wins is not defined.
+ */
+export function sanitizeCustomLocales(
+  locales: unknown
+): Record<string, GopayLocaleStrings> | undefined {
+  if (locales === undefined || locales === null) return undefined;
+  if (!isPlainObject(locales)) {
+    warnOnce(
+      `GopayConfig.customLocales must be a plain object of locale codes, got ` +
+        `${describeObject(locales)}: no custom locale is registered.`
+    );
+    return undefined;
+  }
+  const clean: Record<string, GopayLocaleStrings> = {};
+  const codesByLanguage = new Map<string, string>();
+  for (const [code, strings] of Object.entries(locales)) {
+    const valid = sanitizeLocaleStrings(
+      strings,
+      `GopayConfig.customLocales[${JSON.stringify(code)}]`,
+      'the entry is not registered'
+    );
+    if (!valid) continue;
+    clean[code] = valid;
+    for (const language of new Set(localeLanguages(code))) {
+      const earlier = codesByLanguage.get(language);
+      if (earlier !== undefined) {
+        warnOnce(
+          `GopayConfig.customLocales has ${JSON.stringify(earlier)} and ${JSON.stringify(code)}, ` +
+            `which a native SDK reads both as "${language}": which of them the form uses is not ` +
+            'defined. Keep one code per language.'
+        );
+      } else {
+        codesByLanguage.set(language, code);
+      }
+    }
+  }
+  return clean;
+}
+
+/**
+ * The language part of a locale code as each native SDK reduces it (`'cs-CZ'` and `'cs_CZ'` are
+ * `'cs'` on both): Android takes what comes before the first separator, iOS the first part that is
+ * not empty, so `'-cs'` is `''` on Android and `'cs'` on iOS.
+ */
+function localeLanguages(code: string): [android: string, ios: string] {
+  const parts = code.trim().toLowerCase().split(/[-_]/);
+  return [parts[0]!, parts.find((part) => part.length > 0) ?? ''];
 }
 
 /** The validation display, or `undefined` (the native default) with a warning for another value. */

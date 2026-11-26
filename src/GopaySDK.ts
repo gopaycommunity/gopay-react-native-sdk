@@ -3,6 +3,7 @@ import type { EventSubscription } from 'expo';
 import type { GopayError } from './GopayError';
 import NativeGopay, { type NativeConfig, type NativeEvents } from './GopayReactNativeSDKModule';
 import { invokeCallback, nextCallbackId } from './callbacks';
+import { sanitizeCustomLocales, type GopayLocaleStrings } from './cardForm';
 import { toGopayError, unwrap } from './envelope';
 import type { EncryptedCardPayloadWithMetadata } from './models';
 import { closeAllSessions, obtainSession, type PaymentSession } from './sessions';
@@ -20,6 +21,15 @@ export interface GopayConfig {
   /** Default `false`. */
   debugLoggingEnabled?: boolean;
   locale?: string;
+  /**
+   * Your own translations of the card form, by locale code (`'cs'`, `'sk'`, …), each with all 12
+   * keys of `GopayLocaleStrings`. They take precedence over the SDK's language of the same code
+   * and are selected by `locale` here or on the form. The native SDKs keep only the language part
+   * of a code (`'cs-CZ'` is `'cs'`). An entry with a key missing is left out, with a warning in
+   * development. A later `initialize` adds its entries and replaces those of the same code, but
+   * on neither platform removes the ones it leaves out: they stay until the app restarts.
+   */
+  customLocales?: Record<string, GopayLocaleStrings>;
   /**
    * Timeout of each request in milliseconds. Default 30000 on both platforms (the native default
    * is 60 s on iOS and 30 s on Android; the bridge always passes the value).
@@ -77,6 +87,8 @@ export function toNativeConfig(config: GopayConfig): NativeConfig {
   if (config.clientId !== undefined) native.clientId = config.clientId;
   if (config.shareableKey !== undefined) native.shareableKey = config.shareableKey;
   if (config.locale !== undefined) native.locale = config.locale;
+  const customLocales = sanitizeCustomLocales(config.customLocales);
+  if (customLocales !== undefined) native.customLocales = customLocales;
   return native;
 }
 
