@@ -10,9 +10,15 @@ import GopaySDK
 ///
 /// A session is addressed by its `paymentId`; the SDK keeps the sessions. Neither the
 /// `payment_secret` nor a token or key goes back to JS or into a log.
+///
+/// The SDK's callbacks reach JS as the module's events, each with the id JS gave the call or the
+/// callback (see `src/callbacks.ts`). `awaitChargeState` answers with how many events it sent,
+/// because Expo does not order an event against the answer of a function.
 public class GopayReactNativeSDKModule: Module {
   public func definition() -> ModuleDefinition {
     Name("GopayReactNativeSDK")
+
+    Events("onChargeStateChange", "onChargeActionRequired", "onGopayError")
 
     // `GopaySDK.version` of the linked native SDK.
     Constant("version") {
@@ -23,8 +29,10 @@ public class GopayReactNativeSDKModule: Module {
       GopaySDK.chargeReturnUrl
     }
 
+    // A config with the same connection keeps the open sessions whatever its callback; the SDK
+    // compares the connection only, so a new callback for each initialize is safe.
     Function("initialize") { (config: NativeConfig) -> [String: Any] in
-      GopaySDK.shared.initialize(with: config.gopayConfig())
+      GopaySDK.shared.initialize(with: config.gopayConfig(errorCallback: self.errorCallback(config.errorCallbackId)))
       return Envelope.success(nil)
     }
 
@@ -66,6 +74,32 @@ public class GopayReactNativeSDKModule: Module {
       }
     }
 
+    // The card charges. The JWE and the token go to the SDK only; the browser data is the SDK's.
+    AsyncFunction("sessionChargeWithEncryptedCard") { (paymentId: String, jwe: String, challengePreference: String?) async throws -> [String: Any] in
+      try await Envelope.of {
+        try await Self.session(paymentId).chargeWithEncryptedCard(
+          jwe,
+          browserData: nil,
+          challengePreference: Self.challengePreference(challengePreference)
+        ).bridged
+      }
+    }
+
+    AsyncFunction("sessionChargeWithCardToken") { (paymentId: String, cardToken: String, challengePreference: String?) async throws -> [String: Any] in
+      try await Envelope.of {
+        try await Self.session(paymentId).chargeWithCardToken(
+          cardToken,
+          browserData: nil,
+          challengePreference: Self.challengePreference(challengePreference)
+        ).bridged
+      }
+    }
+
+    // Each callback JS asked for sends an event with `callId`; the answer says how many were sent.
+    AsyncFunction("sessionAwaitChargeState") { (paymentId: String, callId: String, options: NativeAwaitChargeOptions) async throws -> [String: Any] in
+      try await self.awaitChargeState(paymentId: paymentId, callId: callId, options: options)
+    }
+
     // Closing a session the SDK no longer has does nothing, as closing a closed session does.
     AsyncFunction("sessionClose") { (paymentId: String) async -> [String: Any] in
       await GopaySDK.shared.getPaymentSession(paymentId)?.close()
@@ -97,6 +131,55 @@ public class GopayReactNativeSDKModule: Module {
     }
   }
 
+  /// `awaitChargeState` of the session for `paymentId`. Each callback JS asked for sends an event
+  /// with `callId`; the answer carries how many were sent as `events`.
+  private func awaitChargeState(
+    paymentId: String,
+    callId: String,
+    options: NativeAwaitChargeOptions
+  ) async throws -> [String: Any] {
+    let events = EventSink(self)
+    let sent = EventCount()
+    var onStateChange: (@MainActor @Sendable (ChargePaymentResponse) -> Void)?
+    if options.reportStateChanges {
+      onStateChange = { charge in
+        sent.increment()
+        events.send("onChargeStateChange", ["callId": callId, "charge": charge.bridged])
+      }
+    }
+    var onActionRequired: (@MainActor @Sendable (String) -> Void)?
+    if options.reportActionRequired {
+      onActionRequired = { redirectUrl in
+        sent.increment()
+        events.send("onChargeActionRequired", ["callId": callId, "redirectUrl": redirectUrl])
+      }
+    }
+    var answer = try await Envelope.of {
+      // The session first, as the SDK answers a closed session whatever the options say.
+      let session = try await Self.session(paymentId)
+      let awaitOptions = try options.awaitChargeOptions(onStateChange: onStateChange, onActionRequired: onActionRequired)
+      return try await session.awaitChargeState(awaitOptions).bridged
+    }
+    answer["events"] = sent.value
+    return answer
+  }
+
+  /// `GopayConfig.errorCallback` for an `errorCallback` of JS, registered there as `callbackId`:
+  /// it sends each `GopaySDKError` as `onGopayError`, in the shape of the envelope's error.
+  private func errorCallback(_ callbackId: String?) -> (@Sendable (Error) -> Void)? {
+    guard let callbackId = callbackId else { return nil }
+    let events = EventSink(self)
+    return { error in
+      guard let error = error as? GopaySDKError else { return }
+      events.send("onGopayError", ["callbackId": callbackId, "error": error.bridged])
+    }
+  }
+
+  /// The SDK's `ChallengePreference` for its API value, or nil for none.
+  private static func challengePreference(_ value: String?) -> ChallengePreference? {
+    value.flatMap(ChallengePreference.init(rawValue:))
+  }
+
   /// The SDK's session for `paymentId`, or `AUTH_013` as a call on a closed session throws it.
   private static func session(_ paymentId: String) async throws -> PaymentSession {
     guard let session = await GopaySDK.shared.getPaymentSession(paymentId) else {
@@ -115,8 +198,9 @@ struct NativeConfig: Record {
   @Field var debugLoggingEnabled: Bool = false
   @Field var locale: String?
   @Field var requestTimeoutMs: Double = 30_000
+  @Field var errorCallbackId: String?
 
-  func gopayConfig() -> GopayConfig {
+  func gopayConfig(errorCallback: (@Sendable (Error) -> Void)?) -> GopayConfig {
     let gopayEnvironment: GopayEnvironment
     switch environment {
     case "production": gopayEnvironment = .production
@@ -128,10 +212,83 @@ struct NativeConfig: Record {
       clientId: clientId,
       shareableKey: shareableKey,
       debugLoggingEnabled: debugLoggingEnabled,
+      errorCallback: errorCallback,
       locale: locale,
       // JS has milliseconds, the iOS SDK seconds.
       requestTimeout: requestTimeoutMs / 1000
     )
+  }
+}
+
+/// `AwaitChargeOptions` as JS sends it. A time left out keeps the SDK's default.
+struct NativeAwaitChargeOptions: Record {
+  @Field var intervalMs: Double?
+  @Field var initialTimeoutMs: Double?
+  @Field var threeDSMode: String?
+  @Field var returnUrl: String?
+  @Field var reportStateChanges: Bool = false
+  @Field var reportActionRequired: Bool = false
+
+  /// Throws `VALIDATION_007`, as the SDK does for a time that is not positive, for a `threeDSMode`
+  /// that is neither of the two: taken as automatic, it would open a challenge the app meant to run.
+  func awaitChargeOptions(
+    onStateChange: (@MainActor @Sendable (ChargePaymentResponse) -> Void)?,
+    onActionRequired: (@MainActor @Sendable (String) -> Void)?
+  ) throws -> AwaitChargeOptions {
+    let mode: ThreeDSMode
+    switch threeDSMode {
+    case nil, "automatic": mode = .automatic
+    case "manual": mode = .manual
+    default:
+      throw GopaySDKError(
+        .validationInvalidInput,
+        message: "awaitChargeState needs threeDSMode 'automatic' or 'manual'"
+      )
+    }
+    var options = AwaitChargeOptions(
+      threeDSMode: mode,
+      // A string that is no URL is as missing as none: the SDK then waits for chargeReturnUrl,
+      // as it does for a URL it cannot use and as the Android SDK does for both.
+      returnUrl: returnUrl.flatMap(URL.init(string:)),
+      onStateChange: onStateChange,
+      onActionRequired: onActionRequired
+    )
+    // JS has milliseconds, the iOS SDK seconds. The SDK judges the value, a non-positive one too.
+    if let intervalMs = intervalMs { options.interval = intervalMs / 1000 }
+    if let initialTimeoutMs = initialTimeoutMs { options.initialTimeout = initialTimeoutMs / 1000 }
+    return options
+  }
+}
+
+/// Sends the module's events from any thread; holds the module weakly, so that a callback the SDK
+/// keeps after a reload sends nothing once the module is gone.
+final class EventSink: @unchecked Sendable {
+  private weak var module: GopayReactNativeSDKModule?
+
+  init(_ module: GopayReactNativeSDKModule) {
+    self.module = module
+  }
+
+  func send(_ name: String, _ body: [String: Any]) {
+    module?.sendEvent(name, body.mapValues { $0 as Any? })
+  }
+}
+
+/// How many events one call sent.
+final class EventCount: @unchecked Sendable {
+  private let lock = NSLock()
+  private var count = 0
+
+  func increment() {
+    lock.lock()
+    count += 1
+    lock.unlock()
+  }
+
+  var value: Int {
+    lock.lock()
+    defer { lock.unlock() }
+    return count
   }
 }
 
@@ -141,15 +298,7 @@ enum Envelope {
   }
 
   static func failure(_ error: GopaySDKError) -> [String: Any] {
-    var bridged: [String: Any] = ["code": error.code.rawValue, "message": error.message]
-    bridged["httpStatus"] = error.httpStatus
-    bridged["chargeState"] = error.chargeState?.bridged
-    if let gateway = error.gatewayError {
-      bridged["gatewayError"] = compact([
-        "error": gateway.error, "message": gateway.message, "detail": gateway.detail,
-      ])
-    }
-    return ["error": bridged]
+    ["error": error.bridged]
   }
 
   /// The result of `body`, or the `GopaySDKError` it throws as data. Any other error is rethrown.
@@ -165,6 +314,21 @@ enum Envelope {
 /// `values` without the entries that are nil, so that JS sees them as missing.
 func compact(_ values: [String: Any?]) -> [String: Any] {
   values.compactMapValues { $0 }
+}
+
+extension GopaySDKError {
+  /// Every field JS sees, as the envelope and the `onGopayError` event carry it.
+  var bridged: [String: Any] {
+    var bridged: [String: Any] = ["code": code.rawValue, "message": message]
+    bridged["httpStatus"] = httpStatus
+    bridged["chargeState"] = chargeState?.bridged
+    if let gateway = gatewayError {
+      bridged["gatewayError"] = compact([
+        "error": gateway.error, "message": gateway.message, "detail": gateway.detail,
+      ])
+    }
+    return bridged
+  }
 }
 
 // MARK: - Models as JS sees them: the property names of the SDK, enums as their raw values.
