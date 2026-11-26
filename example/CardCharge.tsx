@@ -9,6 +9,8 @@ import {
 import { useEffect, useState } from 'react';
 import { Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
+import { describeError, describeJwe } from './describe';
+
 // A tool for checking the card charge through the bridge by hand, not a demo. Neither the JWE nor
 // the card token is ever shown: the JWE only by its length and parts, the token only as "given"
 // or "empty".
@@ -39,17 +41,6 @@ const describeCharge = (charge: ChargePaymentResponse) =>
   ]
     .filter(Boolean)
     .join(', ');
-
-/** A thrown value: a GopayError with every field, anything else with its name and message. */
-function describeError(error: unknown): string {
-  if (error instanceof GopayError) {
-    const { code, message, httpStatus, chargeState, gatewayError } = error;
-    return `GopayError ${JSON.stringify({ code, message, httpStatus, chargeState, gatewayError })}`;
-  }
-  return `${(error as Error)?.name ?? 'error'} ${(error as Error)?.message ?? String(error)}`;
-}
-
-const describeJwe = (jwe: string) => `JWE ${jwe.length} characters, ${jwe.split('.').length} parts`;
 
 export function CardCharge(props: { formId: string; session: PaymentSession | null }) {
   const { formId, session } = props;
