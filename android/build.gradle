@@ -43,4 +43,6 @@ dependencies {
   implementation 'androidx.compose.foundation:foundation'
   // PaymentCardFormView looks up the saved state owner its ComposeView needs; the version Compose already brings.
   implementation 'androidx.savedstate:savedstate:1.2.1'
+  // The theme's fontFamily is looked up as React Native looks up a fontFamily style, in its ReactFontManager.
+  implementation 'com.facebook.react:react-android'
 }
