@@ -227,6 +227,8 @@ struct NativeConfig: Record {
   @Field var shareableKey: String?
   @Field var debugLoggingEnabled: Bool = false
   @Field var locale: String?
+  /// Locale code to its strings; JS sends only complete sets, and one that is not is skipped here.
+  @Field var customLocales: [String: Any]?
   @Field var requestTimeoutMs: Double = 30_000
   @Field var errorCallbackId: String?
 
@@ -244,6 +246,7 @@ struct NativeConfig: Record {
       debugLoggingEnabled: debugLoggingEnabled,
       errorCallback: errorCallback,
       locale: locale,
+      customLocales: (customLocales ?? [:]).compactMapValues { GopayLocaleStrings(bridged: $0 as? [String: Any]) },
       // JS has milliseconds, the iOS SDK seconds.
       requestTimeout: requestTimeoutMs / 1000
     )
