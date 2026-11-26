@@ -9,10 +9,19 @@ import SwiftUI
 ///
 /// React Native gives the width; the form's height is measured here and reported to JS through
 /// `onFormHeightChange`, which the JS component applies as the view's height. Nothing about the
-/// card crosses the bridge: the form keeps it and hands it to the SDK itself.
+/// card crosses the bridge: the form keeps it and hands it to the SDK itself. Besides the height,
+/// only two booleans leave the form: its validity (`onFormValidityChange`) and, while JS drives
+/// it, the SDK changing the submit flag (`onFormSubmitAttemptedChange`).
+///
+/// A new prop goes into the same SwiftUI `PaymentCardForm`, at the same place in the hierarchy, so
+/// SwiftUI keeps its state: the card typed into the form stays whatever prop changes.
 final class PaymentCardFormView: ExpoView {
   /// Internal to the JS component, not a public prop.
   let onFormHeightChange = EventDispatcher()
+  /// Internal: the form's validity, each time it changes.
+  let onFormValidityChange = EventDispatcher()
+  /// Internal: the SDK raising or lowering the submit flag that JS drives.
+  let onFormSubmitAttemptedChange = EventDispatcher()
 
   private let model = HostedCardFormModel()
   private let hostingController: UIHostingController<HostedCardForm>
@@ -22,6 +31,38 @@ final class PaymentCardFormView: ExpoView {
   var formId: String? {
     get { model.formId }
     set { model.formId = newValue }
+  }
+
+  /// The theme JS sent; `nil` is the SDK's default theme.
+  func setTheme(_ values: [String: Any]?) {
+    model.theme = PaymentCardFormTheme(bridged: values)
+  }
+
+  func setLocale(_ locale: String?) {
+    model.locale = locale
+  }
+
+  /// The strings JS sent; `nil`, or an incomplete set, leaves the form to its locale.
+  func setLocaleStrings(_ values: [String: Any]?) {
+    model.localeStrings = GopayLocaleStrings(bridged: values)
+  }
+
+  func setValidation(_ validation: String?) {
+    model.validation = PaymentCardFormValidationDisplay(bridged: validation)
+  }
+
+  func setAllowsAutofill(_ allowsAutofill: Bool?) {
+    model.allowsAutofill = allowsAutofill ?? false
+  }
+
+  /// The submit flag as JS drives it; `nil` leaves it to the form.
+  func setSubmitAttempted(_ attempted: Bool?) {
+    model.setHostSubmitAttempted(attempted)
+  }
+
+  /// The number of the last `onFormSubmitAttemptedChange` JS has answered.
+  func setSubmitAttemptedAck(_ ack: Int?) {
+    model.answer(ack ?? 0)
   }
 
   required init(appContext: AppContext? = nil) {
@@ -38,6 +79,12 @@ final class PaymentCardFormView: ExpoView {
     addSubview(hostingController.view)
     model.onHeight = { [weak self] height in
       self?.onFormHeightChange(["height": Double(height)])
+    }
+    model.onValidity = { [weak self] isValid in
+      self?.onFormValidityChange(["isValid": isValid])
+    }
+    model.onSubmitAttempted = { [weak self] attempted, seq in
+      self?.onFormSubmitAttemptedChange(["attempted": attempted, "seq": seq])
     }
   }
 
@@ -88,6 +135,71 @@ final class PaymentCardFormView: ExpoView {
 
 private final class HostedCardFormModel: ObservableObject {
   @Published var formId: String?
+  @Published var theme = PaymentCardFormTheme()
+  @Published var locale: String?
+  @Published var localeStrings: GopayLocaleStrings?
+  @Published var validation = PaymentCardFormValidationDisplay.hidden
+  @Published var allowsAutofill = false
+  /// The submit flag JS drives, `nil` while it leaves the flag to the form.
+  @Published private(set) var hostSubmitAttempted: Bool?
+  /// The value reported last, until JS answers that report; `nil` when JS has answered every one.
+  /// The form reads it rather than ``hostSubmitAttempted``, which may still be the value from before
+  /// the report, so a second change the SDK makes before JS answers is not lost.
+  @Published private var pendingSubmitAttempted: Bool?
+  /// How many changes of the flag the view has reported, and the last of them JS has answered.
+  private var reportedSubmitSeq = 0
+  private var answeredSubmitSeq = 0
+
+  /// Told the form's validity whenever it changes, and the first time the form writes it.
+  var onValidity: ((Bool) -> Void)?
+  /// Told the flag, with the number of the report, whenever the SDK changes it while JS drives it.
+  var onSubmitAttempted: ((Bool, Int) -> Void)?
+
+  func setHostSubmitAttempted(_ attempted: Bool?) {
+    hostSubmitAttempted = attempted
+    if attempted == nil { pendingSubmitAttempted = nil }
+  }
+
+  /// JS has answered the reports up to `seq`: from the last one on, the value JS sends is the flag.
+  func answer(_ seq: Int) {
+    answeredSubmitSeq = max(answeredSubmitSeq, seq)
+    if answeredSubmitSeq >= reportedSubmitSeq { pendingSubmitAttempted = nil }
+  }
+  /// The validity last told, `nil` before the form first wrote it. The form writes it on every
+  /// edit; JS hears only the changes.
+  private var reportedValidity: Bool?
+
+  /// What the form writes its validity into. Not published: the form writes it while SwiftUI
+  /// updates the view, and nothing on screen depends on it.
+  var isValid: Binding<Bool> {
+    Binding(
+      get: { [weak self] in self?.reportedValidity ?? false },
+      set: { [weak self] isValid in
+        guard let self, self.reportedValidity != isValid else { return }
+        self.reportedValidity = isValid
+        self.onValidity?(isValid)
+      }
+    )
+  }
+
+  /// The flag for the form while JS drives it, `nil` otherwise, which leaves it to the form. The
+  /// form reads the value JS sent, or the value reported last until JS answers it; when the SDK
+  /// changes the flag, the form writes it here, which tells JS. Once JS answers, the value it sends
+  /// is the flag again, as a binding the host does not store behaves. The form writes only a value
+  /// that differs from what it reads, so JS sending the reported value back raises no new event.
+  var submitAttempted: Binding<Bool>? {
+    guard hostSubmitAttempted != nil else { return nil }
+    return Binding(
+      get: { [weak self] in self?.pendingSubmitAttempted ?? self?.hostSubmitAttempted ?? false },
+      set: { [weak self] attempted in self?.report(attempted) }
+    )
+  }
+
+  private func report(_ attempted: Bool) {
+    reportedSubmitSeq += 1
+    pendingSubmitAttempted = attempted
+    onSubmitAttempted?(attempted, reportedSubmitSeq)
+  }
   /// Told the form's height whenever it changes by more than half a point.
   var onHeight: ((CGFloat) -> Void)?
   /// The width React Native gives the view. Nothing is reported while it is 0: the form then has
@@ -117,7 +229,7 @@ private final class HostedCardFormModel: ObservableObject {
   }
 }
 
-/// The SDK's form with its default look, at the width React Native gives and the height it needs
+/// The SDK's form with the props JS set, at the width React Native gives and the height it needs
 /// at that width, pinned to the top of a taller view.
 private struct HostedCardForm: View {
   @ObservedObject var model: HostedCardFormModel
@@ -125,7 +237,16 @@ private struct HostedCardForm: View {
   var body: some View {
     VStack(spacing: 0) {
       if let formId = model.formId {
-        PaymentCardForm(formId: formId)
+        PaymentCardForm(
+          theme: model.theme,
+          locale: model.locale,
+          localeStrings: model.localeStrings,
+          validation: model.validation,
+          submitAttempted: model.submitAttempted,
+          isValid: model.isValid,
+          formId: formId,
+          allowsAutofill: model.allowsAutofill
+        )
           .fixedSize(horizontal: false, vertical: true)
           .background(
             GeometryReader { proxy in

@@ -123,10 +123,40 @@ public class GopayReactNativeSDKModule: Module {
 
     // The SDK's `PaymentCardForm`, hosted as it is (see PaymentCardFormView.swift).
     View(PaymentCardFormView.self) {
-      Events("onFormHeightChange")
+      Events("onFormHeightChange", "onFormValidityChange", "onFormSubmitAttemptedChange")
 
       Prop("formId") { (view: PaymentCardFormView, formId: String) in
         view.formId = formId
+      }
+
+      // A prop JS leaves out, or drops later, arrives as nil: the SDK's default.
+      Prop("theme") { (view: PaymentCardFormView, theme: [String: Any]?) in
+        view.setTheme(theme)
+      }
+
+      Prop("locale") { (view: PaymentCardFormView, locale: String?) in
+        view.setLocale(locale)
+      }
+
+      Prop("localeStrings") { (view: PaymentCardFormView, localeStrings: [String: Any]?) in
+        view.setLocaleStrings(localeStrings)
+      }
+
+      Prop("validation") { (view: PaymentCardFormView, validation: String?) in
+        view.setValidation(validation)
+      }
+
+      Prop("allowsAutofill") { (view: PaymentCardFormView, allowsAutofill: Bool?) in
+        view.setAllowsAutofill(allowsAutofill)
+      }
+
+      Prop("submitAttempted") { (view: PaymentCardFormView, submitAttempted: Bool?) in
+        view.setSubmitAttempted(submitAttempted)
+      }
+
+      // Internal: the number of the last onFormSubmitAttemptedChange JS has answered.
+      Prop("submitAttemptedAck") { (view: PaymentCardFormView, ack: Int?) in
+        view.setSubmitAttemptedAck(ack)
       }
     }
   }
